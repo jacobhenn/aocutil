@@ -169,13 +169,9 @@ impl<T, const DIM: usize> IndexMut<GridPos<DIM>> for Grid<T, DIM> {
 
 #[test]
 fn test_grid_idx() {
-    let grid: Grid<_, 2> = vec![
-        vec![1, 2, 3],
-        vec![4, 5, 6],
-        vec![7, 8, 9],
-    ]
-    .into_iter()
-    .collect();
+    let grid: Grid<_, 2> = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]]
+        .into_iter()
+        .collect();
     assert_eq!(grid[v!(0, 0)], 1);
     assert_eq!(grid[v!(2, 0)], 3);
     assert_eq!(grid[v!(0, 2)], 7);

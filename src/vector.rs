@@ -225,10 +225,7 @@ pub struct Direction<const DIM: usize> {
 impl<const DIM: usize> Direction<DIM> {
     pub fn new(axis: usize, sign: LineDirection) -> Self {
         assert!(axis < DIM, "axis out of range");
-        Self {
-            axis,
-            sign,
-        }
+        Self { axis, sign }
     }
 
     pub fn negative(axis: usize) -> Self {

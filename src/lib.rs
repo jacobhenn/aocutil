@@ -491,7 +491,11 @@ impl Context {
 }
 
 pub fn get_input(day: usize) -> String {
-    std::fs::read_to_string(format!("{}/{day}", env::var("AOC22_INPUT_DIR").unwrap())).unwrap()
+    std::fs::read_to_string(format!(
+        "{}/{day}",
+        env::var("AOC22_INPUT_DIR").expect("environment variable AOC22_INPUT_DIR should be set")
+    ))
+    .expect("input file should be present")
 }
 
 #[macro_export]
