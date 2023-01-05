@@ -1,5 +1,4 @@
 use std::{
-    borrow::Borrow,
     cmp::{self, Ordering},
     fmt::Debug,
 };

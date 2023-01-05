@@ -1,11 +1,12 @@
-use crate::v;
+use crate::{
+    v,
+    vector::{Direction, Vector},
+};
 
 use std::{
     iter,
     ops::{Index, IndexMut},
 };
-
-use super::vector::Vector;
 
 /// A `DIM`-dimensional grid of values. It is unspecified behavior for `values` to have a length
 /// that is not the product of `self.dimensions`, and so that should be impossible to achieve by
@@ -40,7 +41,7 @@ impl<T, const DIM: usize> Grid<T, DIM> {
         self.dimensions[dim]
     }
 
-    fn unfold_pos(&self, pos: GridPos<DIM>) -> Option<usize> {
+    fn fold_pos(&self, pos: GridPos<DIM>) -> Option<usize> {
         let mut i = 0;
         let mut coef = 1;
         for (index, dimension) in iter::zip(pos.components, self.dimensions) {
@@ -53,6 +54,16 @@ impl<T, const DIM: usize> Grid<T, DIM> {
         Some(i)
     }
 
+    fn unfold_pos(&self, mut pos: usize) -> GridPos<DIM> {
+        let mut res = v!(0; DIM);
+        for (index, dimension) in iter::zip(&mut res.components, self.dimensions) {
+            *index = (pos % dimension) as isize;
+            pos /= dimension;
+        }
+
+        res
+    }
+
     pub fn contains_pos(&self, pos: GridPos<DIM>) -> bool {
         iter::zip(self.dimensions, pos.components)
             .all(|(dim, cmp)| usize::try_from(cmp).map(|cmp| cmp < dim).unwrap_or(false))
@@ -60,28 +71,103 @@ impl<T, const DIM: usize> Grid<T, DIM> {
 
     pub fn get(&self, pos: GridPos<DIM>) -> Option<&T> {
         self.contains_pos(pos)
-            .then(|| self.unfold_pos(pos).and_then(|pos| self.values.get(pos)))
+            .then(|| self.fold_pos(pos).and_then(|pos| self.values.get(pos)))
             .flatten()
     }
 
     pub fn get_mut(&mut self, pos: GridPos<DIM>) -> Option<&mut T> {
         self.contains_pos(pos)
-            .then(|| {
-                self.unfold_pos(pos)
-                    .and_then(|pos| self.values.get_mut(pos))
-            })
+            .then(|| self.fold_pos(pos).and_then(|pos| self.values.get_mut(pos)))
             .flatten()
     }
 
-    pub fn neighbors(&self, center: GridPos<DIM>) -> Neighbors<'_, T, DIM> {
-        println!("making neighbors at {center}");
-        Neighbors {
-            grid: self,
-            center,
-            offset: v!(-1; DIM),
-            idx: 0,
+    pub fn cardinal_neighbors(&self, center: GridPos<DIM>) -> impl Iterator<Item = &T> + '_ {
+        Direction::<DIM>::iter().filter_map(move |d| self.get(center + d))
+    }
+
+    pub fn enumerated_cardinal_neighbors(
+        &self,
+        center: GridPos<DIM>,
+    ) -> impl Iterator<Item = (GridPos<DIM>, &T)> + '_ {
+        Direction::<DIM>::iter().filter_map(move |d| {
+            let n = center + d;
+            self.get(n).map(|v| (n, v))
+        })
+    }
+
+    pub fn find(&self, f: impl FnMut(&T) -> bool) -> Option<GridPos<DIM>> {
+        self.values.iter().position(f).map(|i| self.unfold_pos(i))
+    }
+
+    pub fn positions(&self) -> Positions<DIM> {
+        Positions {
+            dimensions: self.dimensions,
+            current: v!(0; DIM),
+            carry: false,
         }
     }
+
+    pub fn iter_mut_with_pos(&mut self) -> impl Iterator<Item = (GridPos<DIM>, &mut T)> {
+        self.positions().zip(self.values.iter_mut())
+    }
+}
+
+#[test]
+fn test_fold_unfold_pos() {
+    let grid = Grid::<i32, 8> {
+        dimensions: [78, 32, 10, 500, 4, 67, 40, 36],
+        values: Vec::new(),
+    };
+    let v = v!(9, 4, 3, 87, 2, 47, 20, 30);
+    assert_eq!(grid.unfold_pos(grid.fold_pos(v).unwrap()), v);
+
+    let n = 65465416;
+    assert_eq!(grid.fold_pos(grid.unfold_pos(n)).unwrap(), n);
+}
+
+#[test]
+fn test_find() {
+    let grid: Grid<_, 2> = vec![
+        vec![1, 2, 3],
+        vec![4, 5, 6],
+        vec![7, 8, 9],
+        vec![10, 11, 12],
+        vec![13, 14, 15],
+    ]
+    .into_iter()
+    .collect();
+
+    assert_eq!(grid.find(|&x| x == 11).unwrap(), v!(1, 3));
+}
+
+#[test]
+fn test_cardinal_neighbors() {
+    let grid: Grid<_, 2> = vec![
+        vec![1, 2, 3],
+        vec![4, 5, 6],
+        vec![7, 8, 9],
+        vec![10, 11, 12],
+        vec![13, 14, 15],
+    ]
+    .into_iter()
+    .collect();
+
+    itertools::assert_equal(grid.cardinal_neighbors(v!(1, 1)), [&4, &6, &2, &8]);
+}
+
+#[test]
+fn test_corner_cardinal_neighbors() {
+    let grid: Grid<_, 2> = vec![
+        vec![1, 2, 3],
+        vec![4, 5, 6],
+        vec![7, 8, 9],
+        vec![10, 11, 12],
+        vec![13, 14, 15],
+    ]
+    .into_iter()
+    .collect();
+
+    itertools::assert_equal(grid.cardinal_neighbors(v!(2, 4)), [&14, &12]);
 }
 
 impl<T> Grid<T, 2> {
@@ -178,102 +264,55 @@ fn test_grid_idx() {
     assert_eq!(grid[v!(2, 2)], 9);
 }
 
-#[derive(Copy, Clone)]
-pub struct Neighbors<'a, T, const DIM: usize> {
-    grid: &'a Grid<T, DIM>,
-    center: GridPos<DIM>,
-    offset: GridPos<DIM>,
-    idx: usize,
+pub struct Positions<const DIM: usize> {
+    dimensions: [usize; DIM],
+    current: GridPos<DIM>,
+    carry: bool,
 }
 
-impl<'a, T, const DIM: usize> Neighbors<'a, T, DIM> {
-    fn inc_offset(&mut self) {
-        let mut carry = true;
-        for component in self.offset.components.iter_mut() {
-            if !carry {
-                break;
-            }
-
-            if *component == 2 {
-                *component = 0;
-                carry = true;
-            } else {
-                *component += 1;
-                carry = false;
-            }
-        }
-
-        self.idx += 1;
-    }
-}
-
-impl<'a, T, const DIM: usize> Iterator for Neighbors<'a, T, DIM> {
-    type Item = &'a T;
+impl<const DIM: usize> Iterator for Positions<DIM> {
+    type Item = GridPos<DIM>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        println!(
-            "currently on {} (pos: {}) (idx: {})",
-            self.offset,
-            self.center + self.offset,
-            self.idx,
-        );
-        let last_offset = self.offset;
-        self.inc_offset();
-        if self.idx > 9 {
+        if self.carry {
             return None;
         }
 
-        if last_offset.components.iter().all(|&c| c == 0) {
-            println!("    skipping (center)");
-            return self.next();
+        let res = self.current;
+        self.carry = true;
+        for (component, dimension) in iter::zip(&mut self.current.components, self.dimensions) {
+            if self.carry {
+                *component += 1;
+            }
+
+            if *component == dimension as isize {
+                *component = 0;
+            } else {
+                self.carry = false;
+            }
         }
 
-        self.grid.get(self.center + last_offset).or_else(|| {
-            println!("    skipping (oob)");
-            self.next()
-        })
+        Some(res)
     }
 }
 
 #[test]
-fn test_neighbors() {
+fn test_positions() {
     let grid: Grid<_, 2> = vec![
         vec![1, 2, 3],
-        vec![3, 5, 2],
         vec![4, 5, 6],
         vec![7, 8, 9],
-        vec![4, 5, 8],
+        vec![10, 11, 12],
+        vec![13, 14, 15],
     ]
     .into_iter()
     .collect();
 
-    let mut neighbors = grid.neighbors(v!(1, 1));
-    assert_eq!(neighbors.next(), Some(&1));
-    assert_eq!(neighbors.next(), Some(&2));
-    assert_eq!(neighbors.next(), Some(&3));
-    assert_eq!(neighbors.next(), Some(&3));
-    assert_eq!(neighbors.next(), Some(&2));
-    assert_eq!(neighbors.next(), Some(&4));
-    assert_eq!(neighbors.next(), Some(&5));
-    assert_eq!(neighbors.next(), Some(&6));
-    assert_eq!(neighbors.next(), None);
-}
-
-#[test]
-fn test_corner_neighbors() {
-    let grid: Grid<_, 2> = vec![
-        vec![1, 2, 3],
-        vec![3, 5, 2],
-        vec![4, 5, 6],
-        vec![7, 8, 9],
-        vec![4, 5, 8],
-    ]
-    .into_iter()
-    .collect();
-
-    let mut neighbors = grid.neighbors(v!(0, 2));
-    assert_eq!(neighbors.next(), Some(&2));
-    assert_eq!(neighbors.next(), Some(&5));
-    assert_eq!(neighbors.next(), Some(&2));
-    assert_eq!(neighbors.next(), None);
+    let mut positions = grid.positions();
+    assert_eq!(positions.next(), Some(v!(0, 0)));
+    assert_eq!(positions.nth(4), Some(v!(2, 1)));
+    assert_eq!(positions.nth(4), Some(v!(1, 3)));
+    assert_eq!(positions.nth(2), Some(v!(1, 4)));
+    assert_eq!(positions.next(), Some(v!(2, 4)));
+    assert_eq!(positions.next(), None);
 }

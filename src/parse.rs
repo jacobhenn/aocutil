@@ -20,5 +20,5 @@ fn test_unlist() {
 #[test]
 #[should_panic]
 fn test_unlist_panic() {
-    unlist!(super::ints::<i32>("78, 45. 89"), a, b, c, d, e, f, g);
+    unlist!(super::ints::<i32>("78, 45. 89"), _a, _b, _c, _d, _e, _f, _g);
 }

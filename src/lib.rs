@@ -4,7 +4,6 @@ use std::{
     env,
     fmt::{self, Display},
     hash::{Hash, Hasher},
-    io,
     marker::PhantomData,
     mem::MaybeUninit,
     ops::{Add, RangeInclusive},
@@ -16,7 +15,7 @@ use itertools::Itertools;
 
 use num::{One, Signed};
 
-use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{util::SubscriberInitExt, EnvFilter};
 
 pub mod vector;
 

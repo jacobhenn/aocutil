@@ -7,7 +7,7 @@ use std::{borrow::Borrow, cmp::Ordering, fmt::Debug};
 /// # Examples
 ///
 /// ```
-/// use aocutil::range::{Range, RangeSet};
+/// use aocutil::prelude::*;
 ///
 /// let mut nums: RangeSet<i32> = RangeSet::new();
 /// nums.insert(-3..=45);
