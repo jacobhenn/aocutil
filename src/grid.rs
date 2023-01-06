@@ -18,10 +18,23 @@ pub struct Grid<T, const DIM: usize = 2> {
 }
 
 impl<T, const DIM: usize> Grid<T, DIM> {
+    /// Creates an empty `Grid`.
     pub fn new() -> Self {
         Self {
             dimensions: [0; DIM],
             values: Vec::new(),
+        }
+    }
+
+    /// Creates a new `Grid` with the given dimensions and fill it with copies of the provided
+    /// value.
+    pub fn from_dims_and_val(dimensions: [usize; DIM], val: T) -> Self
+    where
+        T: Copy,
+    {
+        Self {
+            dimensions,
+            values: vec![val; dimensions.into_iter().product()],
         }
     }
 
@@ -99,6 +112,9 @@ impl<T, const DIM: usize> Grid<T, DIM> {
         self.values.iter().position(f).map(|i| self.unfold_pos(i))
     }
 
+    /// Returns an iterator over the lattice points contained in this grid. The iterator visits
+    /// positions across earlier dimensions first - so for 2d, it will span a row before moving to
+    /// the next column.
     pub fn positions(&self) -> Positions<DIM> {
         Positions {
             dimensions: self.dimensions,
@@ -175,14 +191,34 @@ fn test_corner_cardinal_neighbors() {
 }
 
 impl<T> Grid<T, 2> {
+    pub fn width(&self) -> usize {
+        self.dimensions[0]
+    }
+
+    pub fn height(&self) -> usize {
+        self.dimensions[1]
+    }
+
     pub fn rows(&self) -> impl Iterator<Item = &[T]> {
-        self.values.windows(self.dimension(0))
+        self.values.chunks(self.dimension(0))
     }
 
     pub fn columns(&self) -> impl Iterator<Item = impl Iterator<Item = &T>> {
         (0..self.dimension(0)).map(move |column| {
             (0..self.dimension(1)).map(move |row| &self[v!(row as isize, column as isize)])
         })
+    }
+
+    pub fn render(&self, render_val: impl Fn(&T) -> char) -> String {
+        let mut res = String::with_capacity((self.width() + 1) * self.height());
+        for row in self.rows() {
+            for val in row {
+                res.push(render_val(val));
+            }
+            res.push('\n');
+        }
+
+        res
     }
 }
 
