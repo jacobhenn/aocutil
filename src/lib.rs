@@ -32,7 +32,17 @@ pub mod range;
 pub mod range_set;
 
 pub mod prelude {
-    pub use super::{graph::*, grid::*, metric::*, parse::*, range::*, range_set::*, vector::*, *};
+    pub use super::{
+        graph::*,
+        grid::*,
+        metric::*,
+        parse::*,
+        part::{self, AocPart, Part},
+        range::*,
+        range_set::*,
+        vector::*,
+        *,
+    };
 
     pub use std::{
         collections::*,
@@ -445,63 +455,56 @@ pub fn test_logger() -> impl SubscriberInitExt {
         .with_test_writer()
 }
 
-// mod part {
-//     use super::Part;
-
-//     pub trait Part {
-//         fn part() -> Part;
-//     }
-
-//     pub struct One;
-
-//     impl Part for One {
-//         fn part() -> Part {
-//             Part::One
-//         }
-//     }
-// }
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Part {
-    One,
-    Two,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Context {
-    pub part: Part,
-    pub example: Option<usize>,
-}
-
-impl Context {
-    pub fn is_part_one(self) -> bool {
-        self.part == Part::One
+pub mod part {
+    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Part {
+        One,
+        Two,
     }
 
-    pub fn is_part_two(self) -> bool {
-        self.part == Part::Two
-    }
+    pub trait AocPart {
+        const PART: Part;
 
-    pub fn is_example(self) -> bool {
-        self.example.is_some()
-    }
+        fn part() -> Part {
+            Self::PART
+        }
 
-    pub fn is_actual(self) -> bool {
-        self.example.is_none()
-    }
+        fn is_one() -> bool {
+            matches!(Self::PART, Part::One)
+        }
 
-    pub fn example(part: Part, n: usize) -> Self {
-        Self {
-            part,
-            example: Some(n),
+        fn is_two() -> bool {
+            matches!(Self::PART, Part::Two)
         }
     }
 
-    pub fn actual(part: Part) -> Self {
-        Self {
-            part,
-            example: None,
+    pub struct One;
+
+    impl AocPart for One {
+        const PART: Part = Part::One;
+    }
+
+    pub struct Two;
+
+    impl AocPart for Two {
+        const PART: Part = Part::Two;
+    }
+
+    // i know this is stupid but i somehow messed it up before so the test stays
+    #[test]
+    fn test_parts() {
+        fn assert_is_part_one<Part: AocPart>() {
+            assert!(Part::is_one());
+            assert!(!Part::is_two());
         }
+
+        fn assert_is_part_two<Part: AocPart>() {
+            assert!(Part::is_two());
+            assert!(!Part::is_one());
+        }
+
+        assert_is_part_one::<One>();
+        assert_is_part_two::<Two>();
     }
 }
 
@@ -526,7 +529,7 @@ macro_rules! example_tests {
             #[allow(unreachable_code)]
             fn $p1n() {
                 let _ = aocutil::test_logger().try_init();
-                assert_eq!(solve($p1in, Context::example(Part::One, 0)), $p1out);
+                assert_eq!(solve::<aocutil::part::One>($p1in), $p1out);
             }
         ),*
 
@@ -535,7 +538,7 @@ macro_rules! example_tests {
             #[allow(unreachable_code)]
             fn $p2n() {
                 let _ = aocutil::test_logger().try_init();
-                assert_eq!(solve($p2in, Context::example(Part::Two, 0)), $p2out);
+                assert_eq!(solve::<aocutil::part::Two>($p2in), $p2out);
             }
         ),*
     }
