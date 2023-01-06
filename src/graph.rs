@@ -1,10 +1,12 @@
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap},
+    fmt::Debug,
     hash::Hash,
     marker::PhantomData,
     mem,
     ops::Add,
+    rc::Rc,
 };
 
 pub trait GraphCursor<'a>
@@ -31,19 +33,22 @@ where
     where
         IsTarget: Fn(&Self) -> bool,
         Cmp: Fn(&Self::Distance, &Self::Distance) -> Ordering + Copy,
-        // TODO: remove this Clone bound (use a slab)
-        Self: Sized + Hash + Eq + Clone,
+        Self: Sized + Hash + Eq,
         Self::Distance: Add<Output = Self::Distance> + Clone,
     {
-        let mut distances: HashMap<Self, Self::Distance> = HashMap::new();
+        let mut distances: HashMap<Rc<Self>, Self::Distance> = HashMap::new();
 
-        let mut predecessors: HashMap<Self, Self> = HashMap::new();
+        let mut predecessors: HashMap<Rc<Self>, Rc<Self>> = HashMap::new();
 
-        let mut frontier: BinaryHeap<RevCmpByKey<Self::Distance, Self, Cmp>> = BinaryHeap::new();
+        let mut frontier: BinaryHeap<RevCmpByKey<Self::Distance, Rc<Self>, Cmp>> =
+            BinaryHeap::new();
 
-        for (distance, neighbor) in self.clone().neighbors() {
-            distances.insert(neighbor.clone(), distance.clone());
-            predecessors.insert(neighbor.clone(), self.clone());
+        let this = Rc::new(self);
+
+        for (distance, neighbor) in this.neighbors() {
+            let neighbor = Rc::new(neighbor);
+            distances.insert(Rc::clone(&neighbor), distance.clone());
+            predecessors.insert(Rc::clone(&neighbor), Rc::clone(&neighbor));
             frontier.push(RevCmpByKey {
                 key: distance,
                 val: neighbor,
@@ -75,15 +80,17 @@ where
                     "all values in the frontier should have had their distances processed already",
                 )
                 .clone();
+
             for (edge_weight, neighbor) in center.neighbors() {
+                let neighbor = Rc::new(neighbor);
                 let alternate_distance = center_distance.clone() + edge_weight;
                 if distances
                     .get(&neighbor)
                     .map(|d| cmp(&alternate_distance, d).is_lt())
                     .unwrap_or(true)
                 {
-                    distances.insert(neighbor.clone(), alternate_distance.clone());
-                    predecessors.insert(neighbor.clone(), center.clone());
+                    distances.insert(Rc::clone(&neighbor), alternate_distance.clone());
+                    predecessors.insert(Rc::clone(&neighbor), Rc::clone(&center));
                     frontier.push(RevCmpByKey {
                         key: alternate_distance,
                         val: neighbor,
@@ -98,7 +105,7 @@ where
 }
 
 /// A container for which all comparison operations go through a custom comparator, whose output
-/// is reversed. This is mainly just a helper type for making Dijkstra's algorithm neater.
+/// is reversed. This is mainly just a helper type for making Dijkstra's algorithm cleaner.
 struct RevCmpByKey<K, V, F> {
     key: K,
     val: V,
@@ -135,13 +142,13 @@ where
 }
 
 pub struct Path<'a, C: GraphCursor<'a>> {
-    path: HashMap<C, C>,
-    cursor: C,
+    path: HashMap<Rc<C>, Rc<C>>,
+    cursor: Rc<C>,
     _marker: PhantomData<&'a ()>,
 }
 
 impl<'a, C: GraphCursor<'a>> Path<'a, C> {
-    pub fn new(path: HashMap<C, C>, start: C) -> Self {
+    pub fn new(path: HashMap<Rc<C>, Rc<C>>, start: Rc<C>) -> Self {
         Self {
             path,
             cursor: start,
@@ -154,7 +161,7 @@ impl<'a, C: GraphCursor<'a>> Iterator for Path<'a, C>
 where
     C: Eq + Hash,
 {
-    type Item = C;
+    type Item = Rc<C>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut next = self.path.remove(&self.cursor)?;

@@ -9,6 +9,7 @@ edition = "2021"
 itertools = "0.10"
 num = "0.4.0"
 tracing = "0.1.37"
+slab = "0.4.7"
 
 [dependencies.tracing-subscriber]
 version = "0.3.16"

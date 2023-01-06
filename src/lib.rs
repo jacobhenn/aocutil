@@ -445,6 +445,22 @@ pub fn test_logger() -> impl SubscriberInitExt {
         .with_test_writer()
 }
 
+// mod part {
+//     use super::Part;
+
+//     pub trait Part {
+//         fn part() -> Part;
+//     }
+
+//     pub struct One;
+
+//     impl Part for One {
+//         fn part() -> Part {
+//             Part::One
+//         }
+//     }
+// }
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Part {
     One,
@@ -500,13 +516,14 @@ pub fn get_input(day: usize) -> String {
 #[macro_export]
 macro_rules! example_tests {
     {
-        part one:
-            $($p1n:ident: $p1in:expr => $p1out:literal),*
-        part two:
-            $($p2n:ident: $p2in:expr => $p2out:literal),*
+        - part one:
+            $($p1n:ident: $p1in:expr => $p1out:expr,)*
+        - part two:
+            $($p2n:ident: $p2in:expr => $p2out:expr,)*
     } => {
         $(
             #[test]
+            #[allow(unreachable_code)]
             fn $p1n() {
                 let _ = aocutil::test_logger().try_init();
                 assert_eq!(solve($p1in, Context::example(Part::One, 0)), $p1out);
@@ -515,6 +532,7 @@ macro_rules! example_tests {
 
         $(
             #[test]
+            #[allow(unreachable_code)]
             fn $p2n() {
                 let _ = aocutil::test_logger().try_init();
                 assert_eq!(solve($p2in, Context::example(Part::Two, 0)), $p2out);
