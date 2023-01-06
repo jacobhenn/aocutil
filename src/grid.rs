@@ -41,7 +41,7 @@ impl<T, const DIM: usize> Grid<T, DIM> {
         self.dimensions[dim]
     }
 
-    fn fold_pos(&self, pos: GridPos<DIM>) -> Option<usize> {
+    pub fn fold_pos(&self, pos: GridPos<DIM>) -> Option<usize> {
         let mut i = 0;
         let mut coef = 1;
         for (index, dimension) in iter::zip(pos.components, self.dimensions) {
@@ -54,7 +54,7 @@ impl<T, const DIM: usize> Grid<T, DIM> {
         Some(i)
     }
 
-    fn unfold_pos(&self, mut pos: usize) -> GridPos<DIM> {
+    pub fn unfold_pos(&self, mut pos: usize) -> GridPos<DIM> {
         let mut res = v!(0; DIM);
         for (index, dimension) in iter::zip(&mut res.components, self.dimensions) {
             *index = (pos % dimension) as isize;
@@ -109,6 +109,10 @@ impl<T, const DIM: usize> Grid<T, DIM> {
 
     pub fn iter_mut_with_pos(&mut self) -> impl Iterator<Item = (GridPos<DIM>, &mut T)> {
         self.positions().zip(self.values.iter_mut())
+    }
+
+    pub fn iter_with_pos(&self) -> impl Iterator<Item = (GridPos<DIM>, &T)> {
+        self.positions().zip(self.values.iter())
     }
 }
 

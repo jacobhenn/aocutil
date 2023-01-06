@@ -1,14 +1,11 @@
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap},
-    fmt::Debug,
     hash::Hash,
     marker::PhantomData,
     mem,
     ops::Add,
 };
-
-use tracing::{debug, trace, trace_span};
 
 pub trait GraphCursor<'a>
 where
@@ -34,56 +31,41 @@ where
     where
         IsTarget: Fn(&Self) -> bool,
         Cmp: Fn(&Self::Distance, &Self::Distance) -> Ordering + Copy,
-        // TODO: remove this Clone bound
-        // TODO: remove this Debug bound (for logging)
-        Self: Sized + Hash + Eq + Clone + Debug,
+        // TODO: remove this Clone bound (use a slab)
+        Self: Sized + Hash + Eq + Clone,
         Self::Distance: Add<Output = Self::Distance> + Clone,
     {
         let mut distances: HashMap<Self, Self::Distance> = HashMap::new();
 
         let mut predecessors: HashMap<Self, Self> = HashMap::new();
 
-        let mut frontier: BinaryHeap<CmpByKey<Self::Distance, Self, Cmp>> = BinaryHeap::new();
+        let mut frontier: BinaryHeap<RevCmpByKey<Self::Distance, Self, Cmp>> = BinaryHeap::new();
 
         for (distance, neighbor) in self.clone().neighbors() {
             distances.insert(neighbor.clone(), distance.clone());
             predecessors.insert(neighbor.clone(), self.clone());
-            frontier.push(CmpByKey {
+            frontier.push(RevCmpByKey {
                 key: distance,
                 val: neighbor,
                 cmp,
             })
         }
 
-        let mut visited_ = HashMap::new();
-        let mut iterations_ = 0;
-
-        // TODO: figure out setup
-
-        while let Some(CmpByKey {
+        while let Some(RevCmpByKey {
             key: distance,
             val: center,
             ..
         }) = frontier.pop()
         {
-            let s = trace_span!("center", ?center);
-            let _g = s.enter();
-            trace!(frontier.len = ?frontier.len());
-
-            iterations_ += 1;
-            *visited_.entry(center.clone()).or_insert(0) += 1;
-
             if is_target(&center) {
-                debug!(?iterations_, ?visited_);
                 return Some((distance, Path::new(predecessors, center)));
             }
 
             if distances
                 .get(&center)
-                .map(|prev_distance| cmp(&distance, prev_distance).is_gt())
+                .map(|current_distance| cmp(&distance, current_distance).is_gt())
                 .unwrap_or(false)
             {
-                trace!("skipping");
                 continue;
             }
 
@@ -95,14 +77,14 @@ where
                 .clone();
             for (edge_weight, neighbor) in center.neighbors() {
                 let alternate_distance = center_distance.clone() + edge_weight;
-                let neighbor_distance = distances.get(&neighbor);
-                if neighbor_distance
+                if distances
+                    .get(&neighbor)
                     .map(|d| cmp(&alternate_distance, d).is_lt())
                     .unwrap_or(true)
                 {
                     distances.insert(neighbor.clone(), alternate_distance.clone());
                     predecessors.insert(neighbor.clone(), center.clone());
-                    frontier.push(CmpByKey {
+                    frontier.push(RevCmpByKey {
                         key: alternate_distance,
                         val: neighbor,
                         cmp,
@@ -115,14 +97,15 @@ where
     }
 }
 
-/// A container for which all comparison operations go through a custom comparator.
-struct CmpByKey<K, V, F> {
+/// A container for which all comparison operations go through a custom comparator, whose output
+/// is reversed. This is mainly just a helper type for making Dijkstra's algorithm neater.
+struct RevCmpByKey<K, V, F> {
     key: K,
     val: V,
     cmp: F,
 }
 
-impl<K, V, F> PartialEq for CmpByKey<K, V, F>
+impl<K, V, F> PartialEq for RevCmpByKey<K, V, F>
 where
     F: Fn(&K, &K) -> Ordering,
 {
@@ -131,23 +114,23 @@ where
     }
 }
 
-impl<K, V, F> Eq for CmpByKey<K, V, F> where F: Fn(&K, &K) -> Ordering {}
+impl<K, V, F> Eq for RevCmpByKey<K, V, F> where F: Fn(&K, &K) -> Ordering {}
 
-impl<K, V, F> PartialOrd for CmpByKey<K, V, F>
-where
-    F: Fn(&K, &K) -> Ordering,
-{
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some((self.cmp)(&self.key, &other.key))
-    }
-}
-
-impl<K, V, F> Ord for CmpByKey<K, V, F>
+impl<K, V, F> Ord for RevCmpByKey<K, V, F>
 where
     F: Fn(&K, &K) -> Ordering,
 {
     fn cmp(&self, other: &Self) -> Ordering {
-        (self.cmp)(&self.key, &other.key)
+        (self.cmp)(&self.key, &other.key).reverse()
+    }
+}
+
+impl<K, V, F> PartialOrd for RevCmpByKey<K, V, F>
+where
+    F: Fn(&K, &K) -> Ordering,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
