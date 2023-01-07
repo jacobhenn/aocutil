@@ -47,6 +47,7 @@ pub mod prelude {
     pub use std::{
         collections::*,
         fmt::{Debug, Display, Write},
+        str::FromStr,
         *,
     };
 
