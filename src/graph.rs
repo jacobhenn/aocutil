@@ -2,10 +2,13 @@ use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap},
     hash::Hash,
-    mem::ManuallyDrop,
+    mem::{ManuallyDrop, self},
     ops::Add,
     ptr,
+    fmt::Debug,
 };
+
+use tracing::{trace_span, trace, debug};
 
 use indexmap::IndexSet;
 
@@ -31,8 +34,9 @@ pub trait Graph {
         cmp: impl Fn(&Self::Distance, &Self::Distance) -> Ordering + Copy,
     ) -> Option<Path<'a, Self>>
     where
-        Self::Node: Eq + Hash,
-        Self::Distance: Add<Output = Self::Distance> + Clone,
+        // TODO: remove debug bounds
+        Self::Node: Eq + Hash + Debug,
+        Self::Distance: Add<Output = Self::Distance> + Clone + Debug,
     {
         let mut nodes: IndexSet<Self::Node> = IndexSet::new();
 
@@ -42,7 +46,16 @@ pub trait Graph {
 
         let mut frontier = BinaryHeap::new();
 
+        debug!("finding shortest path from starting state: {start:?}");
+        
+        trace!("adding neighbors of starting state");
+
+        let s = trace_span!("start neighbors");
+        let g = s.enter();
+
         for (distance, neighbor) in self.neighbors(start) {
+            trace!("adding neighbor {neighbor:?} with distance {distance:?}");
+            
             let (neighbor_key, _) = nodes.insert_full(neighbor);
 
             distances.insert(neighbor_key, distance.clone());
@@ -51,9 +64,14 @@ pub trait Graph {
                 key: distance,
                 val: neighbor_key,
                 cmp,
-            })
+            });
         }
 
+        mem::drop(g);
+
+        let s = trace_span!("expanding");
+        let _g = s.enter();
+        
         while let Some(RevCmpByKey {
             key: distance,
             val: center_idx,
@@ -64,7 +82,10 @@ pub trait Graph {
                 .get_index(center_idx)
                 .expect("frontier nodes should have been added to the set");
 
+            trace!("- popped node {{{center:?}}} from frontier with current distance {distance:?}");
+
             if is_target(&center) {
+                debug!("found target: {center:?}");
                 return Some(Path::new(nodes, predecessors, start, distances, center_idx));
             }
 
@@ -85,15 +106,30 @@ pub trait Graph {
             // about uses of `nodes` from now until `center` is forgotten.
             let center = ManuallyDrop::new(unsafe { ptr::read(center) });
 
+            trace!("iterating through neighbors of center node");
+            
+            let s = trace_span!("neighbors");
+            let _g = s.enter();
+            
             for (edge_weight, neighbor) in self.neighbors(&center) {
+                trace!("- got a neighbor {distance:?} away: {neighbor:?}");
+                
                 let (neighbor_idx, _) = nodes.insert_full(neighbor);
 
                 let alternate_distance = center_distance.clone() + edge_weight;
+
+                trace!("distance through center: {alternate_distance:?}");
+                
                 if distances
                     .get(&neighbor_idx)
-                    .map(|d| cmp(&alternate_distance, d).is_lt())
+                    .map(|d| {
+                        trace!("previous shortest distance: {d:?}");
+                        cmp(&alternate_distance, d).is_lt()
+                    })
                     .unwrap_or(true)
                 {
+                    trace!("through here is better, updating");
+
                     distances.insert(neighbor_idx, alternate_distance.clone());
                     predecessors.insert(neighbor_idx, Some(center_idx));
                     frontier.push(RevCmpByKey {
@@ -101,6 +137,8 @@ pub trait Graph {
                         val: neighbor_idx,
                         cmp,
                     });
+                } else {
+                    trace!("through here is not better");
                 }
             }
         }
@@ -155,8 +193,6 @@ where
 #[derive(Debug, Clone)]
 pub struct Path<'a, G: Graph + ?Sized> {
     nodes: IndexSet<G::Node>,
-    swapped_nodes: Vec<usize>,
-    original_len: usize,
     predecessors: HashMap<usize, Option<usize>>,
     start: &'a G::Node,
     distances: HashMap<usize, G::Distance>,
@@ -174,11 +210,8 @@ impl<'a, G: Graph + ?Sized> Path<'a, G> {
         distances: HashMap<usize, G::Distance>,
         cursor: usize,
     ) -> Self {
-        let original_len = nodes.len();
         Self {
             nodes,
-            swapped_nodes: Vec::new(),
-            original_len,
             predecessors,
             start,
             distances,
@@ -217,7 +250,7 @@ where
             return None;
         }
         
-        let Some(mut idx) = self.cursor
+        let Some(idx) = self.cursor
         else { 
             self.done = true;
             return Some(MaybeOwned::Borrowed(&self.start));
@@ -228,11 +261,8 @@ where
             .remove(&idx)
             .expect("all nodes should have a predecessor");
 
-        self.swapped_nodes.push(idx);
-        while idx >= self.nodes.len() {
-            idx = self.swapped_nodes[self.original_len - idx];
-        }
-
+        trace!(len = self.nodes.len(), idx);
+        
         Some(MaybeOwned::Owned(
             self.nodes
                 .swap_remove_index(idx)

@@ -45,10 +45,13 @@ pub mod prelude {
     };
 
     pub use std::{
+        any, array, cell, cmp,
         collections::*,
+        env, f64, fmt,
         fmt::{Debug, Display, Write},
+        fs, hash, hint, iter, mem, ops, ptr,
         str::FromStr,
-        *,
+        thread,
     };
 
     pub use tracing::*;
