@@ -59,7 +59,13 @@ pub mod prelude {
     pub use tracing_subscriber::util::SubscriberInitExt;
 
     pub use itertools::{self, Itertools};
+
+    pub use anyhow::{anyhow, bail, Context};
 }
+
+pub const DIGIT_NAMES: [&str; 10] = [
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+];
 
 pub enum Signum {
     Minus,
@@ -122,13 +128,15 @@ where
             .find(|c: char| c.is_ascii_digit() || (T::IS_SIGNED && c == '-'))?;
         self.src = &self.src[next_num_start..];
         if let Some(next_num_end) = self.src[1..].find(|c: char| !c.is_ascii_digit()) {
-            let Ok(res) = self.src[..(next_num_end + 1)].parse::<T>()
-            else { return self.next() };
+            let Ok(res) = self.src[..(next_num_end + 1)].parse::<T>() else {
+                return self.next();
+            };
             self.src = &self.src[(next_num_end + 1)..];
             Some(res)
         } else {
-            let Ok(res) = self.src.parse::<T>()
-            else { return self.next() };
+            let Ok(res) = self.src.parse::<T>() else {
+                return self.next();
+            };
             self.src = "";
             Some(res)
         }
@@ -222,11 +230,15 @@ where
     T: Clone,
 {
     let mut out = Vec::new();
-    let Some(max_len) = vecs.iter().map(Vec::len).max() else { return out; };
+    let Some(max_len) = vecs.iter().map(Vec::len).max() else {
+        return out;
+    };
     for i in 0..max_len {
         let mut col = Vec::new();
         for vec in &vecs {
-            let Some(i) = vec.get(i) else { continue; };
+            let Some(i) = vec.get(i) else {
+                continue;
+            };
             col.push(i.clone());
         }
         out.push(col);
@@ -512,10 +524,10 @@ pub mod part {
     }
 }
 
-pub fn get_input(day: usize) -> String {
+pub fn get_input(year: usize, day: usize) -> String {
     std::fs::read_to_string(format!(
-        "{}/{day}",
-        env::var("AOC22_INPUT_DIR").expect("environment variable AOC22_INPUT_DIR should be set")
+        "{}/{year}/{day}",
+        env::var("AOC_INPUT_DIR").expect("environment variable AOC_INPUT_DIR should be set")
     ))
     .expect("input file should be present")
 }

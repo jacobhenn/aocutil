@@ -10,6 +10,7 @@ itertools = "0.12"
 num = "0.4.0"
 tracing = "0.1"
 indexmap = "2"
+anyhow = "1"
 
 [dependencies.tracing-subscriber]
 version = "0.3"
