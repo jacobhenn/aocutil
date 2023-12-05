@@ -77,6 +77,13 @@ impl<T> Range<T> {
         Self { start, end }
     }
 
+    pub fn is_empty(&self) -> bool
+    where
+        T: PartialOrd,
+    {
+        self.start > self.end
+    }
+
     /// Creates a range between the smaller of `a` and `b` to the larger. If there is no ordering
     /// between them, returns `None`.
     pub fn partial_ordered(a: T, b: T) -> Option<Self>
@@ -113,11 +120,11 @@ impl<T> Range<T> {
     }
 
     /// Tests if this range contains the value `val`.
-    pub fn contains(&self, val: &T) -> bool
+    pub fn contains(&self, val: &impl AsBounds<T>) -> bool
     where
         T: PartialOrd,
     {
-        val >= &self.start && val <= &self.end
+        val.start() >= &self.start && val.end() <= &self.end
     }
 
     /// Tests if this range intersects `other` (that is, if there exists some x such that
@@ -150,6 +157,16 @@ impl<T> Range<T> {
         Self::new(
             cmp::min(self.start, other.start),
             cmp::max(self.end, other.end),
+        )
+    }
+
+    pub fn intersection(self, other: Self) -> Self
+    where
+        T: Ord,
+    {
+        Self::new(
+            cmp::max(self.start, other.start),
+            cmp::min(self.end, other.end),
         )
     }
 

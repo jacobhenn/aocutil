@@ -1,14 +1,14 @@
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap},
+    fmt::Debug,
     hash::Hash,
-    mem::{ManuallyDrop, self},
+    mem::{self, ManuallyDrop},
     ops::Add,
     ptr,
-    fmt::Debug,
 };
 
-use tracing::{trace_span, trace, debug};
+use tracing::{debug, trace, trace_span};
 
 use indexmap::IndexSet;
 
@@ -47,7 +47,7 @@ pub trait Graph {
         let mut frontier = BinaryHeap::new();
 
         debug!("finding shortest path from starting state: {start:?}");
-        
+
         trace!("adding neighbors of starting state");
 
         let s = trace_span!("start neighbors");
@@ -55,7 +55,7 @@ pub trait Graph {
 
         for (distance, neighbor) in self.neighbors(start) {
             trace!("adding neighbor {neighbor:?} with distance {distance:?}");
-            
+
             let (neighbor_key, _) = nodes.insert_full(neighbor);
 
             distances.insert(neighbor_key, distance.clone());
@@ -71,7 +71,7 @@ pub trait Graph {
 
         let s = trace_span!("expanding");
         let _g = s.enter();
-        
+
         while let Some(RevCmpByKey {
             key: distance,
             val: center_idx,
@@ -107,19 +107,19 @@ pub trait Graph {
             let center = ManuallyDrop::new(unsafe { ptr::read(center) });
 
             trace!("iterating through neighbors of center node");
-            
+
             let s = trace_span!("neighbors");
             let _g = s.enter();
-            
+
             for (edge_weight, neighbor) in self.neighbors(&center) {
                 trace!("- got a neighbor {distance:?} away: {neighbor:?}");
-                
+
                 let (neighbor_idx, _) = nodes.insert_full(neighbor);
 
                 let alternate_distance = center_distance.clone() + edge_weight;
 
                 trace!("distance through center: {alternate_distance:?}");
-                
+
                 if distances
                     .get(&neighbor_idx)
                     .map(|d| {
@@ -249,9 +249,8 @@ where
         if self.done {
             return None;
         }
-        
-        let Some(idx) = self.cursor
-        else { 
+
+        let Some(idx) = self.cursor else {
             self.done = true;
             return Some(MaybeOwned::Borrowed(&self.start));
         };
@@ -262,7 +261,7 @@ where
             .expect("all nodes should have a predecessor");
 
         trace!(len = self.nodes.len(), idx);
-        
+
         Some(MaybeOwned::Owned(
             self.nodes
                 .swap_remove_index(idx)

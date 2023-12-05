@@ -1,6 +1,11 @@
 use crate::range::{AsBounds, DiscreteOrd, Range};
 
-use std::{borrow::Borrow, cmp::Ordering, fmt::Debug};
+use std::{
+    borrow::Borrow,
+    cmp::Ordering,
+    fmt::Debug,
+    ops::{Add, Sub},
+};
 
 /// A set of values of type `T`, compressed by the use of ranges.
 ///
@@ -18,6 +23,7 @@ use std::{borrow::Borrow, cmp::Ordering, fmt::Debug};
 /// let ranges: Vec<Range<i32>> = nums.into_ranges().collect();
 /// assert_eq!(ranges, &[Range::new(-8, -5), Range::new(-3, 78)]);
 /// ```
+// TODO: write down laws this must follow and make sure they're enforced
 #[derive(Clone, PartialEq, Eq)]
 pub struct RangeSet<T> {
     ranges: Vec<Range<T>>,
@@ -32,10 +38,38 @@ where
     }
 }
 
+// TODO: implement a "remove" method
+
 impl<T> RangeSet<T> {
     /// Makes a new, empty `RangeSet`.
     pub fn new() -> Self {
         Self { ranges: Vec::new() }
+    }
+
+    fn find_containing_range_idx<Q>(&self, key: &Q) -> Result<usize, usize>
+    where
+        Q: Borrow<T>,
+        T: PartialOrd,
+    {
+        self.ranges.binary_search_by(|range| {
+            if range.contains(key.borrow()) {
+                Ordering::Equal
+            } else if key.borrow() < &range.start {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
+        })
+    }
+
+    pub fn find_containing_range<Q>(&self, key: &Q) -> Option<&Range<T>>
+    where
+        Q: Borrow<T>,
+        T: PartialOrd,
+    {
+        self.find_containing_range_idx(key)
+            .map(|i| &self.ranges[i])
+            .ok()
     }
 
     /// Tests if the range set contains the given key value.
@@ -44,17 +78,7 @@ impl<T> RangeSet<T> {
         Q: Borrow<T>,
         T: PartialOrd,
     {
-        self.ranges
-            .binary_search_by(|range| {
-                if range.contains(key.borrow()) {
-                    Ordering::Equal
-                } else if key.borrow() < &range.start {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            })
-            .is_ok()
+        self.find_containing_range_idx(key).is_ok()
     }
 
     pub fn intersects(&self, rhs: &impl AsBounds<T>) -> bool
@@ -107,6 +131,10 @@ impl<T> RangeSet<T> {
     {
         let mut new_range = new_range.into();
 
+        if new_range.is_empty() {
+            return;
+        }
+
         match self.find_touching_range(&new_range) {
             Ok(center) => {
                 new_range = new_range.hull(self.ranges[center].clone());
@@ -141,6 +169,53 @@ impl<T> RangeSet<T> {
             Err(i) => {
                 self.ranges.insert(i, new_range);
             }
+        }
+    }
+
+    // TODO: think this over more. rework the trait bounds; these are messy
+    pub fn remove(&mut self, range_to_remove: impl Into<Range<T>>)
+    where
+        T: PartialOrd + Clone + Add<i64, Output = T> + Sub<i64, Output = T>,
+    {
+        let range_to_remove = range_to_remove.into();
+
+        let first_intersecting_idx = self.find_containing_range_idx(&range_to_remove.start);
+        let last_intersecting_idx = self.find_containing_range_idx(&range_to_remove.end);
+
+        if first_intersecting_idx == last_intersecting_idx {
+            if let Ok(i) = first_intersecting_idx {
+                let containing_range = self.ranges.remove(i);
+
+                let left_remenant =
+                    Range::new(range_to_remove.end + 1, containing_range.end.clone());
+                if !left_remenant.is_empty() {
+                    self.ranges.insert(i, left_remenant);
+                }
+                let right_remenant = Range::new(containing_range.start, range_to_remove.start - 1);
+                if !right_remenant.is_empty() {
+                    self.ranges.insert(i, right_remenant);
+                }
+            }
+        } else {
+            let first_idx_to_remove = match first_intersecting_idx {
+                Ok(i) => {
+                    self.ranges[i].end = range_to_remove.start - 1;
+
+                    i + 1
+                }
+                Err(i) => i,
+            };
+
+            let last_idx_to_remove = match last_intersecting_idx {
+                Ok(i) => {
+                    self.ranges[i].start = range_to_remove.end + 1;
+
+                    i - 1
+                }
+                Err(i) => i - 1,
+            };
+
+            self.ranges.drain(first_idx_to_remove..=last_idx_to_remove);
         }
     }
 
@@ -196,6 +271,8 @@ macro_rules! range_set {
     }
 }
 
+// TODO: add tests for degenerate ranges
+
 #[test]
 fn lots_of_merging() {
     let mut set = RangeSet::new();
@@ -213,6 +290,27 @@ fn lots_of_merging() {
         set.into_ranges().collect::<Vec<_>>(),
         &[Range::new(1, 11), Range::singleton(13)]
     );
+}
+
+#[test]
+fn delete() {
+    let mut set: RangeSet<i64> = range_set![0..=10, 20..=30, 40..=50, 60..=70, 80..=90];
+
+    set.remove(55..=75);
+    assert_eq!(set, range_set![0..=10, 20..=30, 40..=50, 80..=90]);
+
+    set.remove(25..=45);
+    assert_eq!(set, range_set![0..=10, 20..=24, 46..=50, 80..=90]);
+
+    set.remove(82..=88);
+    assert_eq!(set, range_set![0..=10, 20..=24, 46..=50, 80..=81, 89..=90]);
+
+    set.remove(5..=89);
+    assert_eq!(set, range_set![0..=4, 90]);
+
+    set.insert(20..=30);
+    set.remove(20..=30);
+    assert_eq!(set, range_set![0..=4, 90]);
 }
 
 #[test]

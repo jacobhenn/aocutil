@@ -209,6 +209,11 @@ impl<T> Grid<T, 2> {
         })
     }
 
+    pub fn push_row(&mut self, row: Vec<T>) {
+        assert_eq!(row.len(), self.width());
+        self.values.extend(row);
+    }
+
     pub fn render(&self, render_val: impl Fn(&T) -> char) -> String {
         let mut res = String::with_capacity((self.width() + 1) * self.height());
         for row in self.rows() {

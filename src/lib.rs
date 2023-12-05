@@ -63,6 +63,83 @@ pub mod prelude {
     pub use anyhow::{anyhow, bail, Context};
 }
 
+pub enum Endianness {
+    /// The first element of the array is the most significant
+    Big,
+    /// The first element of the array is the least significant
+    Little,
+}
+
+pub struct ArrayCounter<const LEN: usize, const LOOP: bool> {
+    endianness: Endianness,
+    base: usize,
+    current: [usize; LEN],
+}
+
+impl<const LEN: usize, const LOOP: bool> ArrayCounter<LEN, LOOP> {
+    pub fn new(endianness: Endianness, base: usize) -> Self {
+        Self {
+            endianness,
+            base,
+            current: [0; LEN],
+        }
+    }
+
+    pub fn from(endianness: Endianness, base: usize, current: [usize; LEN]) -> Self {
+        Self {
+            endianness,
+            base,
+            current,
+        }
+    }
+}
+
+// impl<const LEN: usize, const LOOP: bool> Iterator for ArrayCounter<LEN, LOOP> {
+//     type Item = [usize; LEN];
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         let res = self.current;
+
+//         let mut i = match self.endianness {
+//             Endianness::Big => LEN - 1,
+//             Endianness::Little => 0,
+//         };
+
+//         let mut carry = true;
+//         while carry {
+//             if self.current[i] == self.base - 1 {
+//                 self.current[i] = 0;
+//                 match self.endianness {
+//                     Endianness::Big => {
+//                         if i == 0 {
+
+//                         } else {
+//                             i -= 1
+//                         }
+//                     },
+//                     Endianness::Little => i += 1,
+//                 }
+//             } else {
+//                 self.current[i] += 1;
+//                 carry = false;
+//             }
+//         }
+
+//         Some(res)
+//     }
+// }
+
+// #[test]
+// fn test_array_counter() {
+//     let mut counter = ArrayCounter::<3, true>::new(Endianness::Little, 3);
+//     assert_eq!(counter.nth(5), Some([2, 1, 0]));
+//     assert_eq!(counter.nth(22), Some([1, 0, 0]));
+
+//     let mut counter = ArrayCounter::<3, true>::new(Endianness::Big, 3);
+//     assert_eq!(counter.nth(5), Some([0, 1, 2]));
+//     assert_eq!(counter.nth(22), Some([0, 0, 1]));
+// }
+
 pub const DIGIT_NAMES: [&str; 10] = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
 ];
@@ -111,9 +188,41 @@ macro_rules! impl_is_signed {
 
 impl_is_signed! { signed: i8 i16 i32 i64 i128 isize; unsigned: u8 u16 u32 u64 u128 usize }
 
-pub struct Ints<'a, T> {
+pub struct IntsRanges<'a, T> {
     src: &'a str,
     _marker: PhantomData<T>,
+}
+
+impl<'a, T> Iterator for IntsRanges<'a, T>
+where
+    T: FromStr + IsSigned,
+{
+    type Item = (RangeInclusive<usize>, T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_num_start = self
+            .src
+            .find(|c: char| c.is_ascii_digit() || (T::IS_SIGNED && c == '-'))?;
+        self.src = &self.src[next_num_start..];
+        if let Some(next_num_end) = self.src[1..].find(|c: char| !c.is_ascii_digit()) {
+            let Ok(res) = self.src[..=next_num_end].parse::<T>() else {
+                return self.next();
+            };
+            self.src = &self.src[(next_num_end + 1)..];
+            Some((next_num_start..=next_num_end, res))
+        } else {
+            let Ok(res) = self.src.parse::<T>() else {
+                return self.next();
+            };
+            let range = next_num_start..=(self.src.len() - 1);
+            self.src = "";
+            Some((range, res))
+        }
+    }
+}
+
+pub struct Ints<'a, T> {
+    ints_ranges: IntsRanges<'a, T>,
 }
 
 impl<'a, T> Iterator for Ints<'a, T>
@@ -123,30 +232,20 @@ where
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next_num_start = self
-            .src
-            .find(|c: char| c.is_ascii_digit() || (T::IS_SIGNED && c == '-'))?;
-        self.src = &self.src[next_num_start..];
-        if let Some(next_num_end) = self.src[1..].find(|c: char| !c.is_ascii_digit()) {
-            let Ok(res) = self.src[..(next_num_end + 1)].parse::<T>() else {
-                return self.next();
-            };
-            self.src = &self.src[(next_num_end + 1)..];
-            Some(res)
-        } else {
-            let Ok(res) = self.src.parse::<T>() else {
-                return self.next();
-            };
-            self.src = "";
-            Some(res)
-        }
+        self.ints_ranges.next().map(|(_, n)| n)
     }
 }
 
 pub fn ints<T>(src: &str) -> Ints<T> {
     Ints {
+        ints_ranges: intsranges(src),
+    }
+}
+
+pub fn intsranges<T>(src: &str) -> IntsRanges<T> {
+    IntsRanges {
         src,
-        _marker: PhantomData,
+        _marker: PhantomData::<T>,
     }
 }
 
