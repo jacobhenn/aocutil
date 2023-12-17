@@ -123,8 +123,10 @@ impl<T> RangeSet<T> {
         self.find_touching_range(val).is_ok()
     }
 
-    /// Inserts the given range into the set, merging with existing ranges if possible.
-    pub fn insert(&mut self, new_range: impl Into<Range<T>>)
+    /// Inserts the given range into the set, merging with existing ranges if possible. Returns
+    /// whether or not a merge was needed (that is, whether a range was found that touched the
+    /// new range).
+    pub fn insert(&mut self, new_range: impl Into<Range<T>>) -> bool
     where
         T: DiscreteOrd + Ord,
         Range<T>: Clone,
@@ -132,7 +134,7 @@ impl<T> RangeSet<T> {
         let mut new_range = new_range.into();
 
         if new_range.is_empty() {
-            return;
+            return false;
         }
 
         match self.find_touching_range(&new_range) {
@@ -165,9 +167,13 @@ impl<T> RangeSet<T> {
 
                 self.ranges[left_bound] = new_range;
                 self.ranges.drain((left_bound + 1)..right_bound);
+
+                true
             }
             Err(i) => {
                 self.ranges.insert(i, new_range);
+
+                false
             }
         }
     }
