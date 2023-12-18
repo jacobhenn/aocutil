@@ -1,6 +1,7 @@
 use crate::{
+    prelude::LineDirection,
     v,
-    vector::{Direction, Vector},
+    vector::{RookDirection, Vector},
 };
 
 use std::{
@@ -8,10 +9,16 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-/// A `DIM`-dimensional grid of values. It is unspecified behavior for `values` to have a length
-/// that is not the product of `self.dimensions`, and so that should be impossible to achieve by
-/// interacting with this through the public interface.
-#[derive(Clone, PartialEq, Eq, Hash)]
+/// A `DIM`-dimensional grid of values.
+///
+/// # UNIFIED ORIENTATION CONVENTIONS
+///
+/// TODO
+///
+// It is unspecified behavior for `values` to have a length
+// that is not the product of `self.dimensions`, and so that should be impossible to achieve by
+// interacting with this through the public interface.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Grid<T, const DIM: usize = 2> {
     dimensions: [usize; DIM],
     values: Vec<T>,
@@ -26,7 +33,7 @@ impl<T, const DIM: usize> Grid<T, DIM> {
         }
     }
 
-    /// Creates a new `Grid` with the given dimensions and fill it with copies of the provided
+    /// Creates a new `Grid` with the given dimensions and fills it with copies of the provided
     /// value.
     pub fn from_dims_and_val(dimensions: [usize; DIM], val: T) -> Self
     where
@@ -94,28 +101,55 @@ impl<T, const DIM: usize> Grid<T, DIM> {
             .flatten()
     }
 
-    pub fn cardinal_neighbors(&self, center: GridPos<DIM>) -> impl Iterator<Item = &T> + '_ {
-        Direction::<DIM>::iter().filter_map(move |d| self.get(center + d))
+    /// Swaps two values in the grid.
+    ///
+    /// # Panics
+    /// Panics if `p` or `q` are out of bounds.
+    pub fn swap(&mut self, p: GridPos<DIM>, q: GridPos<DIM>) {
+        let i = self
+            .fold_pos(p)
+            .expect("positions to swap should be inside array");
+        let j = self
+            .fold_pos(q)
+            .expect("positions to swap should be inside array");
+
+        self.values.swap(i, j);
     }
 
-    pub fn enumerated_cardinal_neighbors(
+    pub fn rook_neighbors(&self, center: GridPos<DIM>) -> impl Iterator<Item = &T> {
+        RookDirection::<DIM>::iter().filter_map(move |d| self.get(center + d))
+    }
+
+    pub fn enumerated_rook_neighbors(
         &self,
         center: GridPos<DIM>,
-    ) -> impl Iterator<Item = (GridPos<DIM>, &T)> + '_ {
-        Direction::<DIM>::iter().filter_map(move |d| {
+    ) -> impl Iterator<Item = (GridPos<DIM>, &T)> {
+        RookDirection::<DIM>::iter().filter_map(move |d| {
             let n = center + d;
             self.get(n).map(|v| (n, v))
         })
+    }
+
+    /// Returns the maximum distance you could travel from `pos` in `direction` while staying
+    /// inside the dimensions of the grid.
+    pub fn distance_to_edge(&self, pos: GridPos<DIM>, direction: RookDirection<DIM>) -> isize {
+        match direction.sign() {
+            LineDirection::Negative => pos[direction.axis()],
+            LineDirection::Positive => {
+                self.dimensions[direction.axis()] as isize - pos[direction.axis()] - 1
+            }
+        }
     }
 
     pub fn find(&self, f: impl FnMut(&T) -> bool) -> Option<GridPos<DIM>> {
         self.values.iter().position(f).map(|i| self.unfold_pos(i))
     }
 
-    /// Returns an iterator over the lattice points contained in this grid. The iterator visits
-    /// positions across earlier dimensions first - so for 2d, it will span a row before moving to
-    /// the next column.
-    pub fn positions(&self) -> Positions<DIM> {
+    /// Returns an iterator over the lattice points contained in this grid.
+    ///
+    /// "zm" stands for "zero major", so the iterator will increment dimension `0` contiguously
+    /// (in 2d, this means row-major)
+    pub fn positions_zm(&self) -> Positions<DIM> {
         Positions {
             dimensions: self.dimensions,
             current: v!(0; DIM),
@@ -123,12 +157,16 @@ impl<T, const DIM: usize> Grid<T, DIM> {
         }
     }
 
-    pub fn iter_mut_with_pos(&mut self) -> impl Iterator<Item = (GridPos<DIM>, &mut T)> {
-        self.positions().zip(self.values.iter_mut())
+    /// "zm" stands for "zero major", so the iterator will increment dimension `0` contiguously
+    /// (in 2d, this means row-major)
+    pub fn iter_zm_mut_with_pos(&mut self) -> impl Iterator<Item = (GridPos<DIM>, &mut T)> {
+        self.positions_zm().zip(self.values.iter_mut())
     }
 
-    pub fn iter_with_pos(&self) -> impl Iterator<Item = (GridPos<DIM>, &T)> {
-        self.positions().zip(self.values.iter())
+    /// "zm" stands for "zero major", so the iterator will increment dimension `0` contiguously
+    /// (in 2d, this means row-major)
+    pub fn iter_zm_with_pos(&self) -> impl Iterator<Item = (GridPos<DIM>, &T)> {
+        self.positions_zm().zip(self.values.iter())
     }
 }
 
@@ -172,7 +210,7 @@ fn test_cardinal_neighbors() {
     .into_iter()
     .collect();
 
-    itertools::assert_equal(grid.cardinal_neighbors(v!(1, 1)), [&4, &6, &2, &8]);
+    itertools::assert_equal(grid.rook_neighbors(v!(1, 1)), [&4, &6, &2, &8]);
 }
 
 #[test]
@@ -187,7 +225,7 @@ fn test_corner_cardinal_neighbors() {
     .into_iter()
     .collect();
 
-    itertools::assert_equal(grid.cardinal_neighbors(v!(2, 4)), [&14, &12]);
+    itertools::assert_equal(grid.rook_neighbors(v!(2, 4)), [&14, &12]);
 }
 
 impl<T> Grid<T, 2> {
@@ -205,26 +243,93 @@ impl<T> Grid<T, 2> {
 
     pub fn columns(&self) -> impl Iterator<Item = impl Iterator<Item = &T>> {
         (0..self.dimension(0)).map(move |column| {
-            (0..self.dimension(1)).map(move |row| &self[v!(row as isize, column as isize)])
+            (0..self.dimension(1)).map(move |row| &self[v!(column as isize, row as isize)])
         })
     }
 
-    pub fn push_row(&mut self, row: Vec<T>) {
-        assert_eq!(row.len(), self.width());
+    pub fn push_row<I>(&mut self, row: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
         self.values.extend(row);
+        self.dimensions[1] += 1;
+        assert_eq!(self.values.len(), self.dimensions[0] * self.dimensions[1]);
     }
 
-    pub fn render(&self, render_val: impl Fn(&T) -> char) -> String {
+    // TODO: this is highly inefficient. think about different ways to do this
+    pub fn insert_row<I>(&mut self, y: usize, new_row: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let mut i = self
+            .fold_pos(v!(0, y as isize))
+            .expect("row should be within bounds");
+
+        for value in new_row {
+            self.values.insert(i, value);
+            i += 1;
+        }
+
+        self.dimensions[1] += 1;
+        assert_eq!(self.values.len(), self.dimensions[0] * self.dimensions[1]);
+    }
+
+    pub fn render(&self, render_val: impl Fn(GridPos, &T) -> char) -> String {
         let mut res = String::with_capacity((self.width() + 1) * self.height());
-        for row in self.rows() {
-            for val in row {
-                res.push(render_val(val));
+        for (y, row) in self.rows().enumerate() {
+            for (x, val) in row.iter().enumerate() {
+                res.push(render_val(v!(x as isize, y as isize), val));
             }
             res.push('\n');
         }
 
         res
     }
+
+    pub fn transposed(&self) -> Self
+    where
+        T: Clone,
+    {
+        self.columns().map(Iterator::cloned).collect()
+    }
+}
+
+#[test]
+fn test_columns() {
+    let grid: Grid<i32, 2> = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]]
+        .into_iter()
+        .collect();
+
+    let middle_column: Vec<i32> = grid.columns().nth(1).unwrap().copied().collect();
+    assert_eq!(middle_column, vec![2, 5, 8]);
+}
+
+#[test]
+fn test_transposed() {
+    let grid: Grid<i32, 2> = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]]
+        .into_iter()
+        .collect();
+
+    let grid_transposed: Grid<i32, 2> = vec![vec![1, 4, 7], vec![2, 5, 8], vec![3, 6, 9]]
+        .into_iter()
+        .collect();
+
+    assert_eq!(grid.transposed(), grid_transposed);
+}
+
+#[test]
+fn test_insert_row() {
+    let mut before: Grid<_, 2> = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]]
+        .into_iter()
+        .collect();
+
+    let after: Grid<_, 2> = vec![vec![1, 2, 3], vec![0, 0, 0], vec![4, 5, 6], vec![7, 8, 9]]
+        .into_iter()
+        .collect();
+
+    before.insert_row(1, vec![0, 0, 0]);
+
+    assert_eq!(before, after);
 }
 
 impl<R, T> FromIterator<R> for Grid<T, 2>
@@ -353,7 +458,7 @@ fn test_positions() {
     .into_iter()
     .collect();
 
-    let mut positions = grid.positions();
+    let mut positions = grid.positions_zm();
     assert_eq!(positions.next(), Some(v!(0, 0)));
     assert_eq!(positions.nth(4), Some(v!(2, 1)));
     assert_eq!(positions.nth(4), Some(v!(1, 3)));

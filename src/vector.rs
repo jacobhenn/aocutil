@@ -1,4 +1,4 @@
-use crate::{array_zip_with, metric::Metric, signum, PlaneAxis, Signum};
+use crate::{array_zip_with, metric::Metric, signum, ArrayCounter, PlaneAxis, Signum};
 
 use std::{
     array,
@@ -60,26 +60,27 @@ impl<T, const DIM: usize> Vector<T, DIM> {
     }
 }
 
-impl<T> Vector<T, 2> {
-    /// Returns the quadrant this vector points to, or the cardinal direction if the vector is
-    /// strictly axis-aligned, or `None` if the vector is zero.
-    pub fn quadrant(self) -> Option<PrincipalWind>
-    where
-        T: Signed,
-    {
-        match (signum(&self[0]), signum(&self[1])) {
-            (Signum::Zero, Signum::Zero) => None,
-            (Signum::Plus, Signum::Zero) => Some(PrincipalWind::East),
-            (Signum::Plus, Signum::Plus) => Some(PrincipalWind::Northeast),
-            (Signum::Zero, Signum::Plus) => Some(PrincipalWind::North),
-            (Signum::Minus, Signum::Plus) => Some(PrincipalWind::Northwest),
-            (Signum::Minus, Signum::Zero) => Some(PrincipalWind::West),
-            (Signum::Minus, Signum::Minus) => Some(PrincipalWind::Southwest),
-            (Signum::Zero, Signum::Minus) => Some(PrincipalWind::South),
-            (Signum::Plus, Signum::Minus) => Some(PrincipalWind::Southeast),
-        }
-    }
-}
+// TODO: make this general; return a `QueenDirection`
+// impl<T> Vector<T, 2> {
+//     /// Returns the quadrant this vector points to, or the cardinal direction if the vector is
+//     /// strictly axis-aligned, or `None` if the vector is zero.
+//     pub fn quadrant(self) -> Option<PrincipalWind>
+//     where
+//         T: Signed,
+//     {
+//         match (signum(&self[0]), signum(&self[1])) {
+//             (Signum::Zero, Signum::Zero) => None,
+//             (Signum::Plus, Signum::Zero) => Some(PrincipalWind::East),
+//             (Signum::Plus, Signum::Plus) => Some(PrincipalWind::Northeast),
+//             (Signum::Zero, Signum::Plus) => Some(PrincipalWind::North),
+//             (Signum::Minus, Signum::Plus) => Some(PrincipalWind::Northwest),
+//             (Signum::Minus, Signum::Zero) => Some(PrincipalWind::West),
+//             (Signum::Minus, Signum::Minus) => Some(PrincipalWind::Southwest),
+//             (Signum::Zero, Signum::Minus) => Some(PrincipalWind::South),
+//             (Signum::Plus, Signum::Minus) => Some(PrincipalWind::Southeast),
+//         }
+//     }
+// }
 
 // TODO: make this work for more tuples
 impl<T> From<(T, T)> for Vector<T, 2> {
@@ -213,16 +214,18 @@ fn test_vector_display() {
 
 /// A "cardinal direction" in `DIM`-dimensional space.
 ///
-/// This is implemented by simply storing a number which indexes into the possible directions. It
+/// This is implemented by simply storing the index of the axis and a sign. It
 /// is a logic error for the inner number to be `>= DIM`. If a `Direction` observes such an
 /// error, its behavior is unspecified.
+///
+/// Iteration order is currently -x +x -y +y but this may change.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Direction<const DIM: usize> {
+pub struct RookDirection<const DIM: usize = 2> {
     axis: usize,
     sign: LineDirection,
 }
 
-impl<const DIM: usize> Direction<DIM> {
+impl<const DIM: usize> RookDirection<DIM> {
     pub fn new(axis: usize, sign: LineDirection) -> Self {
         assert!(axis < DIM, "axis out of range");
         Self { axis, sign }
@@ -230,18 +233,12 @@ impl<const DIM: usize> Direction<DIM> {
 
     pub fn negative(axis: usize) -> Self {
         assert!(axis < DIM, "axis out of range");
-        Self {
-            axis,
-            sign: LineDirection::Negative,
-        }
+        Self::new(axis, LineDirection::Negative)
     }
 
     pub fn positive(axis: usize) -> Self {
         assert!(axis < DIM, "axis out of range");
-        Self {
-            axis,
-            sign: LineDirection::Positive,
-        }
+        Self::new(axis, LineDirection::Positive)
     }
 
     pub fn axis(self) -> usize {
@@ -252,15 +249,23 @@ impl<const DIM: usize> Direction<DIM> {
         self.sign
     }
 
-    pub fn iter() -> DirectionIter<DIM> {
-        DirectionIter(Self {
-            axis: 0,
-            sign: LineDirection::Negative,
-        })
+    pub fn with_axis(self, axis: usize) -> Self {
+        assert!(axis < DIM, "axis out of range");
+        Self { axis, ..self }
+    }
+
+    pub fn with_sign(self, sign: LineDirection) -> Self {
+        Self { sign, ..self }
+    }
+
+    pub fn iter() -> RookDirectionIter<DIM> {
+        RookDirectionIter {
+            current: Self::new(0, LineDirection::Negative),
+        }
     }
 }
 
-impl<const DIM: usize> Debug for Direction<DIM> {
+impl<const DIM: usize> Debug for RookDirection<DIM> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.sign == LineDirection::Negative {
             f.write_char('-')?;
@@ -276,11 +281,11 @@ impl<const DIM: usize> Debug for Direction<DIM> {
     }
 }
 
-impl<T, const DIM: usize> From<Direction<DIM>> for Vector<T, DIM>
+impl<T, const DIM: usize> From<RookDirection<DIM>> for Vector<T, DIM>
 where
     T: Neg<Output = T> + One + Zero,
 {
-    fn from(value: Direction<DIM>) -> Self {
+    fn from(value: RookDirection<DIM>) -> Self {
         let mut res = Vector::from_fn(|_| T::zero());
         res[value.axis] = match value.sign {
             LineDirection::Negative => T::one().neg(),
@@ -290,19 +295,19 @@ where
     }
 }
 
-impl<T, const DIM: usize> Add<Direction<DIM>> for Vector<T, DIM>
+impl<T, const DIM: usize> Add<RookDirection<DIM>> for Vector<T, DIM>
 where
     T: Neg<Output = T> + One + Zero + AddAssign,
 {
     type Output = Self;
 
-    fn add(mut self, rhs: Direction<DIM>) -> Self::Output {
+    fn add(mut self, rhs: RookDirection<DIM>) -> Self::Output {
         self.components[rhs.axis] += rhs.sign.to_num();
         self
     }
 }
 
-impl<const DIM: usize> Neg for Direction<DIM> {
+impl<const DIM: usize> Neg for RookDirection<DIM> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -314,20 +319,22 @@ impl<const DIM: usize> Neg for Direction<DIM> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct DirectionIter<const DIM: usize>(Direction<DIM>);
+pub struct RookDirectionIter<const DIM: usize> {
+    current: RookDirection<DIM>,
+}
 
-impl<const DIM: usize> Iterator for DirectionIter<DIM> {
-    type Item = Direction<DIM>;
+impl<const DIM: usize> Iterator for RookDirectionIter<DIM> {
+    type Item = RookDirection<DIM>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.0.axis >= DIM {
+        if self.current.axis >= DIM {
             return None;
         }
 
-        let res = self.0;
-        self.0.sign = -self.0.sign;
-        if self.0.sign == LineDirection::Negative {
-            self.0.axis += 1;
+        let res = self.current;
+        self.current.sign = -self.current.sign;
+        if self.current.sign == LineDirection::Negative {
+            self.current.axis += 1;
         }
 
         Some(res)
@@ -337,12 +344,12 @@ impl<const DIM: usize> Iterator for DirectionIter<DIM> {
 #[test]
 fn direction_iter() {
     itertools::assert_equal(
-        Direction::<2>::iter().map(|d| CardinalDirection::from(d)),
+        RookDirection::<2>::iter(),
         [
-            CardinalDirection::West,
-            CardinalDirection::East,
-            CardinalDirection::South,
-            CardinalDirection::North,
+            RookDirection::<2>::MINUS_X,
+            RookDirection::<2>::PLUS_X,
+            RookDirection::<2>::MINUS_Y,
+            RookDirection::<2>::PLUS_Y,
         ],
     );
 }
@@ -350,7 +357,7 @@ fn direction_iter() {
 #[test]
 fn unit_vector() {
     itertools::assert_equal(
-        Direction::<2>::iter().map(|d| Vector::from(d)),
+        RookDirection::<2>::iter().map(|d| Vector::from(d)),
         [v!(-1, 0), v!(1, 0), v!(0, -1), v!(0, 1)],
     );
 }
@@ -371,6 +378,22 @@ impl LineDirection {
             LineDirection::Positive => T::one(),
         }
     }
+
+    /// Returns `true` if the line direction is [`Negative`].
+    ///
+    /// [`Negative`]: LineDirection::Negative
+    #[must_use]
+    pub fn is_negative(&self) -> bool {
+        matches!(self, Self::Negative)
+    }
+
+    /// Returns `true` if the line direction is [`Positive`].
+    ///
+    /// [`Positive`]: LineDirection::Positive
+    #[must_use]
+    pub fn is_positive(&self) -> bool {
+        matches!(self, Self::Positive)
+    }
 }
 
 impl Neg for LineDirection {
@@ -384,13 +407,13 @@ impl Neg for LineDirection {
     }
 }
 
-impl From<Direction<1>> for LineDirection {
-    fn from(value: Direction<1>) -> Self {
+impl From<RookDirection<1>> for LineDirection {
+    fn from(value: RookDirection<1>) -> Self {
         value.sign
     }
 }
 
-impl Direction<1> {
+impl RookDirection<1> {
     pub const NEGATIVE: Self = Self {
         axis: 0,
         sign: LineDirection::Negative,
@@ -402,106 +425,100 @@ impl Direction<1> {
     };
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
-pub enum CardinalDirection {
-    East,
-    North,
-    West,
-    South,
-}
-
-impl From<Direction<2>> for CardinalDirection {
-    fn from(value: Direction<2>) -> Self {
-        if value.axis == 0 {
-            match value.sign {
-                LineDirection::Negative => Self::West,
-                LineDirection::Positive => Self::East,
-            }
-        } else {
-            match value.sign {
-                LineDirection::Negative => Self::South,
-                LineDirection::Positive => Self::North,
-            }
-        }
-    }
-}
-
-impl Direction<2> {
-    pub const EAST: Self = Self {
+impl RookDirection<2> {
+    pub const PLUS_X: Self = Self {
         axis: 0,
         sign: LineDirection::Positive,
     };
 
-    pub const NORTH: Self = Self {
+    pub const PLUS_Y: Self = Self {
         axis: 1,
         sign: LineDirection::Positive,
     };
 
-    pub const WEST: Self = Self {
+    pub const MINUS_X: Self = Self {
         axis: 0,
         sign: LineDirection::Negative,
     };
 
-    pub const SOUTH: Self = Self {
+    pub const MINUS_Y: Self = Self {
         axis: 1,
         sign: LineDirection::Negative,
     };
 
-    pub fn from_udlr(c: &str) -> Option<Self> {
-        match c {
-            "U" => Some(Self::NORTH),
-            "D" => Some(Self::SOUTH),
-            "L" => Some(Self::WEST),
-            "R" => Some(Self::EAST),
-            _ => None,
-        }
+    pub fn perpendicular_axis(self) -> usize {
+        (self.axis() + 1) % 2
     }
 
-    pub fn from_nesw(c: &str) -> Option<Self> {
-        match c {
-            "N" => Some(Self::NORTH),
-            "E" => Some(Self::EAST),
-            "S" => Some(Self::SOUTH),
-            "W" => Some(Self::WEST),
-            _ => None,
-        }
-    }
+    // pub fn from_udlr(c: &str) -> Option<Self> {
+    //     match c {
+    //         "U" => Some(Self::NORTH),
+    //         "D" => Some(Self::SOUTH),
+    //         "L" => Some(Self::WEST),
+    //         "R" => Some(Self::EAST),
+    //         _ => None,
+    //     }
+    // }
 
-    pub fn from_wasd(c: &str) -> Option<Self> {
-        match c {
-            "W" => Some(Self::NORTH),
-            "A" => Some(Self::WEST),
-            "S" => Some(Self::SOUTH),
-            "D" => Some(Self::EAST),
-            _ => None,
-        }
+    // pub fn from_nesw(c: &str) -> Option<Self> {
+    //     match c {
+    //         "N" => Some(Self::NORTH),
+    //         "E" => Some(Self::EAST),
+    //         "S" => Some(Self::SOUTH),
+    //         "W" => Some(Self::WEST),
+    //         _ => None,
+    //     }
+    // }
+
+    // pub fn from_wasd(c: &str) -> Option<Self> {
+    //     match c {
+    //         "W" => Some(Self::NORTH),
+    //         "A" => Some(Self::WEST),
+    //         "S" => Some(Self::SOUTH),
+    //         "D" => Some(Self::EAST),
+    //         _ => None,
+    //     }
+    // }
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub struct BishopDirection<const DIM: usize> {
+    components: [LineDirection; DIM],
+}
+
+impl<const DIM: usize> BishopDirection<DIM> {
+    pub const fn new(components: [LineDirection; DIM]) -> Self {
+        Self { components }
     }
 }
 
-/// A cardinal or intercardinal direction.
-#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
-pub enum PrincipalWind {
-    East,
-    Northeast,
-    North,
-    Northwest,
-    West,
-    Southwest,
-    South,
-    Southeast,
+impl<T, const DIM: usize> From<BishopDirection<DIM>> for Vector<T, DIM>
+where
+    T: Neg<Output = T> + One,
+{
+    fn from(value: BishopDirection<DIM>) -> Self {
+        Vector::from_fn(|i| match value.components[i] {
+            LineDirection::Negative => T::one().neg(),
+            LineDirection::Positive => T::one(),
+        })
+    }
 }
 
-impl From<PrincipalWind> for Vector {
-    fn from(direction: PrincipalWind) -> Self {
-        match direction {
-            PrincipalWind::East => v!(1, 0),
-            PrincipalWind::Northeast => v!(1, 1),
-            PrincipalWind::North => v!(0, 1),
-            PrincipalWind::Northwest => v!(-1, 1),
-            PrincipalWind::West => v!(-1, 0),
-            PrincipalWind::Southwest => v!(-1, -1),
-            PrincipalWind::South => v!(0, -1),
-            PrincipalWind::Southeast => v!(1, -1),
-        }
-    }
+impl BishopDirection<2> {
+    pub const SOUTH_WEST: Self = Self::new([LineDirection::Negative, LineDirection::Negative]);
+    pub const SOUTH_EAST: Self = Self::new([LineDirection::Positive, LineDirection::Negative]);
+    pub const NORTH_WEST: Self = Self::new([LineDirection::Negative, LineDirection::Positive]);
+    pub const NORTH_EAST: Self = Self::new([LineDirection::Positive, LineDirection::Positive]);
+}
+
+#[test]
+fn bishop_direction_to_vector() {
+    assert_eq!(
+        Into::<Vector<i32>>::into(BishopDirection::<2>::NORTH_WEST),
+        v!(-1, 1)
+    );
+}
+
+pub struct BishopDirectionIter<const DIM: usize> {
+    current: ArrayCounter<DIM, false>,
 }
