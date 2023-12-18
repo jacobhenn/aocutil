@@ -45,11 +45,14 @@ pub mod prelude {
     };
 
     pub use std::{
-        any, array, cell, cmp,
+        any, array, cell,
+        cmp::{self, Ordering},
         collections::*,
         env, f64, fmt,
         fmt::{Debug, Display, Write},
-        fs, hash, hint, iter, mem, ops, ptr,
+        fs,
+        hash::{self, Hash, Hasher},
+        hint, iter, mem, ops, ptr,
         str::FromStr,
         thread,
     };
@@ -63,6 +66,7 @@ pub mod prelude {
     pub use anyhow::{anyhow, bail, Context};
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum Endianness {
     /// The first element of the array is the most significant
     Big,
@@ -94,51 +98,61 @@ impl<const LEN: usize, const LOOP: bool> ArrayCounter<LEN, LOOP> {
     }
 }
 
-// impl<const LEN: usize, const LOOP: bool> Iterator for ArrayCounter<LEN, LOOP> {
-//     type Item = [usize; LEN];
+impl<const LEN: usize, const LOOP: bool> Iterator for ArrayCounter<LEN, LOOP> {
+    type Item = [usize; LEN];
 
-//     fn next(&mut self) -> Option<Self::Item> {
-//         let res = self.current;
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_i = |i| match self.endianness {
+            Endianness::Big => i - 1,
+            Endianness::Little => i + 1,
+        };
 
-//         let mut i = match self.endianness {
-//             Endianness::Big => LEN - 1,
-//             Endianness::Little => 0,
-//         };
+        let most_significant_i = match self.endianness {
+            Endianness::Big => 0,
+            Endianness::Little => LEN - 1,
+        };
 
-//         let mut carry = true;
-//         while carry {
-//             if self.current[i] == self.base - 1 {
-//                 self.current[i] = 0;
-//                 match self.endianness {
-//                     Endianness::Big => {
-//                         if i == 0 {
+        let res = self.current;
 
-//                         } else {
-//                             i -= 1
-//                         }
-//                     },
-//                     Endianness::Little => i += 1,
-//                 }
-//             } else {
-//                 self.current[i] += 1;
-//                 carry = false;
-//             }
-//         }
+        let mut i = match self.endianness {
+            Endianness::Big => LEN - 1,
+            Endianness::Little => 0,
+        };
 
-//         Some(res)
-//     }
-// }
+        let mut carry = true;
+        while carry {
+            if self.current[i] == self.base - 1 {
+                self.current[i] = 0;
 
-// #[test]
-// fn test_array_counter() {
-//     let mut counter = ArrayCounter::<3, true>::new(Endianness::Little, 3);
-//     assert_eq!(counter.nth(5), Some([2, 1, 0]));
-//     assert_eq!(counter.nth(22), Some([1, 0, 0]));
+                if i == most_significant_i {
+                    if LOOP {
+                        break;
+                    } else {
+                        return None;
+                    }
+                } else {
+                    i = next_i(i);
+                }
+            } else {
+                self.current[i] += 1;
+                carry = false;
+            }
+        }
 
-//     let mut counter = ArrayCounter::<3, true>::new(Endianness::Big, 3);
-//     assert_eq!(counter.nth(5), Some([0, 1, 2]));
-//     assert_eq!(counter.nth(22), Some([0, 0, 1]));
-// }
+        Some(res)
+    }
+}
+
+#[test]
+fn test_array_counter() {
+    let mut counter = ArrayCounter::<3, true>::new(Endianness::Little, 3);
+    assert_eq!(counter.nth(5), Some([2, 1, 0]));
+    assert_eq!(counter.nth(22), Some([1, 0, 0]));
+
+    let mut counter = ArrayCounter::<3, true>::new(Endianness::Big, 3);
+    assert_eq!(counter.nth(5), Some([0, 1, 2]));
+    assert_eq!(counter.nth(22), Some([0, 0, 1]));
+}
 
 pub const DIGIT_NAMES: [&str; 10] = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
@@ -310,15 +324,28 @@ pub trait IteratorExt: Iterator + Sized {
     fn fill_array<const N: usize>(&mut self) -> Option<[Self::Item; N]> {
         let mut res =
             unsafe { MaybeUninit::<[MaybeUninit<Self::Item>; N]>::uninit().assume_init() };
+        let mut i = 0;
         for slot in &mut res {
             slot.write(self.next()?);
+            i += 1;
         }
 
-        Some(res.map(|u| unsafe { u.assume_init() }))
+        (i >= N).then(|| res.map(|u| unsafe { u.assume_init() }))
     }
 
     fn util_array_chunks<const N: usize>(self) -> ArrayChunks<Self, N> {
         ArrayChunks { inner: self }
+    }
+
+    fn hash(self) -> u64
+    where
+        Self::Item: Hash,
+    {
+        let mut hasher = DefaultHasher::new();
+        for item in self {
+            item.hash(&mut hasher);
+        }
+        hasher.finish()
     }
 }
 
@@ -631,6 +658,7 @@ pub fn get_input(year: usize, day: usize) -> String {
     .expect("input file should be present")
 }
 
+/// this is semi-deprecated
 #[macro_export]
 macro_rules! example_tests {
     {
@@ -646,7 +674,7 @@ macro_rules! example_tests {
                 let _ = aocutil::test_logger().try_init();
                 assert_eq!(solve::<aocutil::part::One>($p1in), $p1out);
             }
-        ),*
+        )*
 
         $(
             #[test]
@@ -655,6 +683,59 @@ macro_rules! example_tests {
                 let _ = aocutil::test_logger().try_init();
                 assert_eq!(solve::<aocutil::part::Two>($p2in), $p2out);
             }
-        ),*
+        )*
+    }
+}
+
+#[macro_export]
+macro_rules! aoc_test {
+    (
+        $name:ident: $part:path, $(@$input:ident)? $($in:expr),* => $out:expr
+    ) => {
+        #[test]
+        #[allow(unreachable_code)]
+        fn $name() {
+            let _ = aocutil::test_logger().try_init();
+            assert_eq!(
+                solve::<$part>(
+                    $({
+                        stringify!($input);
+                        &aocutil::get_input(YEAR, DAY)
+                    },)?
+                    $($in),*
+                ),
+                $out,
+            );
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! aoc_tests {
+    {
+        inputs {
+            $(
+                $in_name:ident = $in_val:expr,
+            )*
+        }
+
+        $(
+            $part:path {
+                $(
+                    $name:ident: $(@$input:ident)? $($in:expr),* => $out:expr,
+                )*
+            }
+        )*
+    } => {
+        $(
+            #[allow(non_upper_case_globals)]
+            const $in_name: &str = $in_val;
+        )*
+
+        $(
+            $(
+                aoc_test!($name: $part, $(@$input)? $($in),* => $out);
+            )*
+        )*
     }
 }
