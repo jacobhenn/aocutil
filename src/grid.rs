@@ -101,6 +101,17 @@ impl<T, const DIM: usize> Grid<T, DIM> {
             .flatten()
     }
 
+    /// Get the value at `pos` in this grid. If the position lies outside the grid, treat the
+    /// grid like it repeats infinitely in every direction.
+    pub fn get_wrapping(&self, mut pos: GridPos<DIM>) -> &T {
+        for i in 0..DIM {
+            pos[i] = pos[i].rem_euclid(self.dimensions[i] as isize);
+        }
+
+        self.get(pos)
+            .expect("wrapped position should be inside array")
+    }
+
     /// Swaps two values in the grid.
     ///
     /// # Panics
@@ -181,6 +192,26 @@ fn test_fold_unfold_pos() {
 
     let n = 65465416;
     assert_eq!(grid.fold_pos(grid.unfold_pos(n)).unwrap(), n);
+}
+
+#[test]
+fn test_get_wrapping() {
+    let grid: Grid<_, 2> = vec![
+        vec![1, 2, 3],
+        vec![4, 5, 6],
+        vec![7, 8, 9],
+        vec![10, 11, 12],
+        vec![13, 14, 15],
+    ]
+    .into_iter()
+    .collect();
+
+    assert_eq!(*grid.get_wrapping(v!(1, 1)), 5);
+    assert_eq!(*grid.get_wrapping(v!(4, 1)), 5);
+    assert_eq!(*grid.get_wrapping(v!(-2, 1)), 5);
+    assert_eq!(*grid.get_wrapping(v!(1, -4)), 5);
+    assert_eq!(*grid.get_wrapping(v!(-2, -4)), 5);
+    assert_eq!(*grid.get_wrapping(v!(-14, -14)), 5);
 }
 
 #[test]
