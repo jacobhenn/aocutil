@@ -15,7 +15,9 @@ macro_rules! v {
     ( $val:expr; $num:expr ) => { Vector::new([$val; $num]) };
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
+/// NB: The `Ord` implementation for `Vector` is simply lexicographic. Only use it for stuff
+/// like `BTreeSet` or `slice::binary_search`.
+#[derive(PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord)]
 pub struct Vector<T = i32, const DIM: usize = 2> {
     pub components: [T; DIM],
 }
@@ -192,18 +194,39 @@ where
 
 impl<T, const DIM: usize> Display for Vector<T, DIM>
 where
-    T: Display + Clone,
+    T: Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "⟨{}⟩",
-            self.components
-                .iter()
-                .map(|c| c.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        f.write_char('⟨')?;
+        let mut components = self.components.iter().peekable();
+        while let Some(component) = components.next() {
+            if components.peek().is_some() {
+                write!(f, "{}, ", component)?;
+            } else {
+                write!(f, "{}", component)?;
+            }
+        }
+        f.write_char('⟩')?;
+        Ok(())
+    }
+}
+
+impl<T, const DIM: usize> Debug for Vector<T, DIM>
+where
+    T: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_char('⟨')?;
+        let mut components = self.components.iter().peekable();
+        while let Some(component) = components.next() {
+            if components.peek().is_some() {
+                write!(f, "{:?}, ", component)?;
+            } else {
+                write!(f, "{:?}", component)?;
+            }
+        }
+        f.write_char('⟩')?;
+        Ok(())
     }
 }
 
