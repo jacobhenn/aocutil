@@ -289,6 +289,13 @@ impl<const DIM: usize> RookDirection<DIM> {
             current: Self::new(0, LineDirection::Negative),
         }
     }
+
+    pub fn unit_vector<T>(self) -> Vector<T, DIM>
+    where
+        T: Neg<Output = T> + One + Zero,
+    {
+        Vector::from(self)
+    }
 }
 
 impl<const DIM: usize> Debug for RookDirection<DIM> {
