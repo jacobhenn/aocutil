@@ -478,15 +478,21 @@ impl RookDirection<2> {
         (self.axis() + 1) % 2
     }
 
-    // pub fn from_udlr(c: &str) -> Option<Self> {
-    //     match c {
-    //         "U" => Some(Self::NORTH),
-    //         "D" => Some(Self::SOUTH),
-    //         "L" => Some(Self::WEST),
-    //         "R" => Some(Self::EAST),
-    //         _ => None,
-    //     }
-    // }
+    /// Parse a `RookDirection<2>` from U/D/L/R using the "positive-down" convention where +y is
+    /// displayed as increasing downwards.
+    /// - `"U" => Self::MINUS_Y`
+    /// - `"D" => Self::PLUS_Y`
+    /// - `"L" => Self::MINUS_X`
+    /// - `"R" => Self::PLUS_X`
+    pub fn from_udlr_positive_down(c: &str) -> Option<Self> {
+        match c {
+            "U" => Some(Self::MINUS_Y),
+            "D" => Some(Self::PLUS_Y),
+            "L" => Some(Self::MINUS_X),
+            "R" => Some(Self::PLUS_X),
+            _ => None,
+        }
+    }
 
     // pub fn from_nesw(c: &str) -> Option<Self> {
     //     match c {
