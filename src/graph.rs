@@ -1,16 +1,12 @@
 use std::{
     cmp::Ordering,
-    collections::{BinaryHeap, HashMap},
+    collections::{BinaryHeap, HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
-    mem::{self, ManuallyDrop},
     ops::Add,
-    ptr,
 };
 
-use tracing::{debug, trace, trace_span};
-
-use indexmap::IndexSet;
+use tracing::{debug, trace};
 
 pub trait Graph {
     type Distance;
@@ -23,249 +19,129 @@ pub trait Graph {
 
     fn neighbors<'a>(&'a self, center: &'a Self::Node) -> Self::Neighbors<'a>;
 
-    /// Find the shortest path (under comparator `cmp`) to an arbitrary node which satisfies
-    /// `is_target`. Returns the total length of the path and the path itself. Note that the
-    /// returned path will iterate in reverse order (from the target node to the source). If all
-    /// nodes in the graph are exhausted and the target has not been found, returns `None`.
-    fn shortest_path<'a>(
-        &'a self,
-        start: &'a Self::Node,
+    // TODO: add documentation
+    fn shortest_paths_dijkstra(
+        &self,
+        start: Self::Node,
         is_target: impl Fn(&Self::Node) -> bool,
-        cmp: impl Fn(&Self::Distance, &Self::Distance) -> Ordering + Copy,
-    ) -> Option<Path<'a, Self>>
+    ) -> (
+        Option<Self::Node>,
+        HashMap<Self::Node, (Self::Distance, Self::Node)>,
+    )
     where
         // TODO: remove debug bounds
-        Self::Node: Eq + Hash + Debug,
-        Self::Distance: Add<Output = Self::Distance> + Clone + Debug,
+        Self::Node: Eq + Hash + Clone + Debug,
+        Self::Distance: Ord + Add<Output = Self::Distance> + Clone + Debug,
     {
-        let mut nodes: IndexSet<Self::Node> = IndexSet::new();
+        let mut spanning_tree: HashMap<Self::Node, (Self::Distance, Self::Node)> = HashMap::new();
 
-        let mut distances: HashMap<usize, Self::Distance> = HashMap::new();
-
-        let mut predecessors: HashMap<usize, Option<usize>> = HashMap::new();
+        // TODO: does this need to be here?
+        let mut visited: HashSet<Self::Node> = HashSet::new();
 
         let mut frontier = BinaryHeap::new();
 
-        debug!("finding shortest path from starting state: {start:?}");
-
-        trace!("adding neighbors of starting state");
-
-        let s = trace_span!("start neighbors");
-        let g = s.enter();
-
-        for (distance, neighbor) in self.neighbors(start) {
-            trace!("adding neighbor {neighbor:?} with distance {distance:?}");
-
-            let (neighbor_key, _) = nodes.insert_full(neighbor);
-
-            distances.insert(neighbor_key, distance.clone());
-            predecessors.insert(neighbor_key, None);
+        for (distance, neighbor) in self.neighbors(&start) {
             frontier.push(RevCmpByKey {
-                key: distance,
-                val: neighbor_key,
-                cmp,
+                key: distance.clone(),
+                val: neighbor.clone(),
             });
+
+            spanning_tree.insert(neighbor, (distance, start.clone()));
         }
 
-        mem::drop(g);
-
-        let s = trace_span!("expanding");
-        let _g = s.enter();
-
         while let Some(RevCmpByKey {
-            key: distance,
-            val: center_idx,
-            ..
+            key: current_node_dist,
+            val: current_node,
         }) = frontier.pop()
         {
-            let center = nodes
-                .get_index(center_idx)
-                .expect("frontier nodes should have been added to the set");
+            trace!("looking at frontier entry: {current_node:?} at dist {current_node_dist:?}");
 
-            trace!("- popped node {{{center:?}}} from frontier with current distance {distance:?}");
-
-            if is_target(&center) {
-                debug!("found target: {center:?}");
-                return Some(Path::new(nodes, predecessors, start, distances, center_idx));
+            if is_target(&current_node) {
+                return (Some(current_node), spanning_tree);
             }
 
-            let center_distance = distances
-                .get(&center_idx)
-                .expect(
-                    "all values in the frontier should have had their distances processed already",
-                )
-                .clone();
+            // Check if this is an old frontier entry that should be ignored
 
-            if cmp(&distance, &center_distance).is_gt() {
+            if current_node == start {
                 continue;
             }
 
-            // SAFETY: this read leaves us with the obligations to prevent a double-free of
-            // `center`, and to act as though it has been moved out of `nodes`. wrapping it in a
-            // `ManuallyDrop` takes care of the frist condition, and so we just have to be careful
-            // about uses of `nodes` from now until `center` is forgotten.
-            let center = ManuallyDrop::new(unsafe { ptr::read(center) });
+            let (current_node_best_dist, _) = spanning_tree.get(&current_node).expect(
+                "all values in the frontier should have had their distances processed already",
+            );
 
-            trace!("iterating through neighbors of center node");
+            // TODO: is this check necessary given `visited`?
+            if &current_node_dist > current_node_best_dist {
+                continue;
+            }
 
-            let s = trace_span!("neighbors");
-            let _g = s.enter();
+            if !visited.insert(current_node.clone()) {
+                continue;
+            }
 
-            for (edge_weight, neighbor) in self.neighbors(&center) {
-                trace!("- got a neighbor {distance:?} away: {neighbor:?}");
+            // trace!("  (valid)");
 
-                let (neighbor_idx, _) = nodes.insert_full(neighbor);
+            // Update neighbors
 
-                let alternate_distance = center_distance.clone() + edge_weight;
+            for (neighbor_dist, neighbor) in self.neighbors(&current_node) {
+                let neighbor_new_dist = current_node_dist.clone() + neighbor_dist;
 
-                trace!("distance through center: {alternate_distance:?}");
-
-                if distances
-                    .get(&neighbor_idx)
-                    .map(|d| {
-                        trace!("previous shortest distance: {d:?}");
-                        cmp(&alternate_distance, d).is_lt()
-                    })
-                    .unwrap_or(true)
-                {
-                    trace!("through here is better, updating");
-
-                    distances.insert(neighbor_idx, alternate_distance.clone());
-                    predecessors.insert(neighbor_idx, Some(center_idx));
-                    frontier.push(RevCmpByKey {
-                        key: alternate_distance,
-                        val: neighbor_idx,
-                        cmp,
-                    });
-                } else {
-                    trace!("through here is not better");
+                if let Some((neighbor_best_dist, _)) = spanning_tree.get(&neighbor) {
+                    if neighbor_best_dist < &neighbor_new_dist {
+                        continue;
+                    }
                 }
+
+                trace!("  found better distance to {neighbor:?}: {neighbor_new_dist:?}");
+
+                spanning_tree.insert(
+                    neighbor.clone(),
+                    (neighbor_new_dist.clone(), current_node.clone()),
+                );
+
+                frontier.push(RevCmpByKey {
+                    key: neighbor_new_dist,
+                    val: neighbor,
+                });
             }
         }
 
-        None
+        (None, spanning_tree)
     }
 }
 
-/// A container for which all comparison operations go through a custom comparator, whose output
+/// A container for which all comparison operations use a key, and comparison
 /// is reversed. This is mainly just a helper type for making Dijkstra's algorithm cleaner.
-struct RevCmpByKey<K, V, F> {
+struct RevCmpByKey<K, V> {
     key: K,
     val: V,
-    cmp: F,
 }
 
-impl<K, V, F> PartialEq for RevCmpByKey<K, V, F>
+impl<K, V> PartialEq for RevCmpByKey<K, V>
 where
-    F: Fn(&K, &K) -> Ordering,
+    K: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        (self.cmp)(&self.key, &other.key) == Ordering::Equal
+        self.key == other.key
     }
 }
 
-impl<K, V, F> Eq for RevCmpByKey<K, V, F> where F: Fn(&K, &K) -> Ordering {}
+impl<K, V> Eq for RevCmpByKey<K, V> where K: Eq {}
 
-impl<K, V, F> Ord for RevCmpByKey<K, V, F>
+impl<K, V> Ord for RevCmpByKey<K, V>
 where
-    F: Fn(&K, &K) -> Ordering,
+    K: Ord,
 {
     fn cmp(&self, other: &Self) -> Ordering {
-        (self.cmp)(&self.key, &other.key).reverse()
+        self.key.cmp(&other.key).reverse()
     }
 }
 
-impl<K, V, F> PartialOrd for RevCmpByKey<K, V, F>
+impl<K, V> PartialOrd for RevCmpByKey<K, V>
 where
-    F: Fn(&K, &K) -> Ordering,
+    K: PartialOrd,
 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-/// # Properties
-///
-/// - there are no cycles in `predecessors`
-/// - all indices which appear as keys in `predecessors`, `cursor` or `distances` begin as valid
-/// indices into `nodes`. when `next` is called, `cursor` ceases to be a valid index (at least in
-/// pretend land).
-#[derive(Debug, Clone)]
-pub struct Path<'a, G: Graph + ?Sized> {
-    nodes: IndexSet<G::Node>,
-    predecessors: HashMap<usize, Option<usize>>,
-    start: &'a G::Node,
-    distances: HashMap<usize, G::Distance>,
-    cursor: Option<usize>,
-    done: bool,
-}
-
-// TODO: figure out where i should `expect` versus `try` down below
-
-impl<'a, G: Graph + ?Sized> Path<'a, G> {
-    pub fn new(
-        nodes: IndexSet<G::Node>,
-        predecessors: HashMap<usize, Option<usize>>,
-        start: &'a G::Node,
-        distances: HashMap<usize, G::Distance>,
-        cursor: usize,
-    ) -> Self {
-        Self {
-            nodes,
-            predecessors,
-            start,
-            distances,
-            cursor: Some(cursor),
-            done: false,
-        }
-    }
-
-    /// Returns the **remaining** length in the path. This should decrease (according to the
-    /// comparator function provided to [`Graph::shortest_path_with`]) every time `next` is called.
-    /// Returns `None` if the path has been walked to completion.
-    pub fn len(&self) -> Option<&G::Distance>
-    where
-        G::Node: Eq + Hash,
-    {
-        self.distances.get(&self.cursor?)
-    }
-}
-
-// unfortunately, i can't use `Cow` for this, because then i'd have to require that `Node` be
-// `ToOwned`.
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum MaybeOwned<'a, T> {
-    Borrowed(&'a T),
-    Owned(T),
-}
-
-impl<'a, G: Graph> Iterator for Path<'a, G>
-where
-    G::Node: Eq + Hash,
-{
-    type Item = MaybeOwned<'a, G::Node>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-
-        let Some(idx) = self.cursor else {
-            self.done = true;
-            return Some(MaybeOwned::Borrowed(&self.start));
-        };
-
-        self.cursor = self
-            .predecessors
-            .remove(&idx)
-            .expect("all nodes should have a predecessor");
-
-        trace!(len = self.nodes.len(), idx);
-
-        Some(MaybeOwned::Owned(
-            self.nodes
-                .swap_remove_index(idx)
-                .expect("node set should be populated"),
-        ))
+        self.key.partial_cmp(&other.key).map(Ordering::reverse)
     }
 }
