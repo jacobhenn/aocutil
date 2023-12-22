@@ -1,4 +1,4 @@
-use crate::{array_zip_with, metric::Metric, signum, ArrayCounter, PlaneAxis, Signum};
+use crate::{array_zip_with, metric::Metric, ArrayCounter, Endianness, PlaneAxis};
 
 use std::{
     array,
@@ -7,7 +7,7 @@ use std::{
     ops::{Add, AddAssign, Index, IndexMut, Mul, Neg, Sub, SubAssign},
 };
 
-use num::{One, Signed, Zero};
+use num::{One, Zero};
 
 #[macro_export]
 macro_rules! v {
@@ -219,7 +219,10 @@ fn test_vector_display() {
 /// error, its behavior is unspecified.
 ///
 /// Iteration order is currently -x +x -y +y but this may change.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Note: the `PartialOrd` implementation orders first by axis, then sign. So for 2d,
+/// -x < +x < -y < +y
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RookDirection<const DIM: usize = 2> {
     axis: usize,
     sign: LineDirection,
@@ -362,7 +365,9 @@ fn unit_vector() {
     );
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
+/// Note: PartialOrd is Negative < Positive
+#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy, PartialOrd, Ord)]
+#[repr(u8)]
 pub enum LineDirection {
     Negative,
     Positive,
@@ -371,7 +376,7 @@ pub enum LineDirection {
 impl LineDirection {
     pub fn to_num<T>(self) -> T
     where
-        T: Zero + One + Neg<Output = T>,
+        T: One + Neg<Output = T>,
     {
         match self {
             LineDirection::Negative => -T::one(),
@@ -481,7 +486,7 @@ impl RookDirection<2> {
     // }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash)]
 pub struct BishopDirection<const DIM: usize> {
     components: [LineDirection; DIM],
 }
@@ -490,18 +495,55 @@ impl<const DIM: usize> BishopDirection<DIM> {
     pub const fn new(components: [LineDirection; DIM]) -> Self {
         Self { components }
     }
+
+    pub fn iter() -> impl Iterator<Item = Self> {
+        ArrayCounter::<DIM>::new(Endianness::Little, 2).map(|arr| {
+            Self::new(arr.map(|n| match n {
+                0 => LineDirection::Negative,
+                1 => LineDirection::Positive,
+                _ => panic!("array counter out of range"),
+            }))
+        })
+    }
 }
 
 impl<T, const DIM: usize> From<BishopDirection<DIM>> for Vector<T, DIM>
 where
-    T: Neg<Output = T> + One,
+    T: One + Neg<Output = T>,
 {
     fn from(value: BishopDirection<DIM>) -> Self {
-        Vector::from_fn(|i| match value.components[i] {
-            LineDirection::Negative => T::one().neg(),
-            LineDirection::Positive => T::one(),
-        })
+        Self {
+            components: value.components.map(LineDirection::to_num),
+        }
     }
+}
+
+impl<T, const DIM: usize> Add<BishopDirection<DIM>> for Vector<T, DIM>
+where
+    T: One + Neg<Output = T> + Add<T>,
+{
+    type Output = Vector<<T as Add<T>>::Output, DIM>;
+
+    fn add(self, rhs: BishopDirection<DIM>) -> Self::Output {
+        self + Self::from(rhs)
+    }
+}
+
+#[test]
+fn test_bishop_direction_iter() {
+    for dir in BishopDirection::<2>::iter() {
+        println!("{dir:?}");
+    }
+
+    itertools::assert_equal(
+        BishopDirection::<2>::iter(),
+        [
+            BishopDirection::SOUTH_WEST,
+            BishopDirection::SOUTH_EAST,
+            BishopDirection::NORTH_WEST,
+            BishopDirection::NORTH_EAST,
+        ],
+    );
 }
 
 impl BishopDirection<2> {
@@ -517,8 +559,4 @@ fn bishop_direction_to_vector() {
         Into::<Vector<i32>>::into(BishopDirection::<2>::NORTH_WEST),
         v!(-1, 1)
     );
-}
-
-pub struct BishopDirectionIter<const DIM: usize> {
-    current: ArrayCounter<DIM, false>,
 }

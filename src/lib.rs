@@ -52,7 +52,9 @@ pub mod prelude {
         fmt::{Debug, Display, Write},
         fs,
         hash::{self, Hash, Hasher},
-        hint, iter, mem, ops, ptr,
+        hint, iter,
+        marker::PhantomData,
+        mem, ops, ptr,
         str::FromStr,
         thread,
     };
@@ -74,34 +76,41 @@ pub enum Endianness {
     Little,
 }
 
-pub struct ArrayCounter<const LEN: usize, const LOOP: bool> {
+pub struct ArrayCounter<const LEN: usize> {
     endianness: Endianness,
     base: usize,
+    done: bool,
     current: [usize; LEN],
 }
 
-impl<const LEN: usize, const LOOP: bool> ArrayCounter<LEN, LOOP> {
+impl<const LEN: usize> ArrayCounter<LEN> {
     pub fn new(endianness: Endianness, base: usize) -> Self {
         Self {
             endianness,
             base,
+            done: false,
             current: [0; LEN],
         }
     }
 
-    pub fn from(endianness: Endianness, base: usize, current: [usize; LEN]) -> Self {
+    pub fn starting_at(endianness: Endianness, base: usize, current: [usize; LEN]) -> Self {
         Self {
             endianness,
             base,
+            done: false,
             current,
         }
     }
 }
 
-impl<const LEN: usize, const LOOP: bool> Iterator for ArrayCounter<LEN, LOOP> {
+impl<const LEN: usize> Iterator for ArrayCounter<LEN> {
     type Item = [usize; LEN];
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
         let next_i = |i| match self.endianness {
             Endianness::Big => i - 1,
             Endianness::Little => i + 1,
@@ -125,11 +134,8 @@ impl<const LEN: usize, const LOOP: bool> Iterator for ArrayCounter<LEN, LOOP> {
                 self.current[i] = 0;
 
                 if i == most_significant_i {
-                    if LOOP {
-                        break;
-                    } else {
-                        return None;
-                    }
+                    self.done = true;
+                    break;
                 } else {
                     i = next_i(i);
                 }
@@ -145,13 +151,12 @@ impl<const LEN: usize, const LOOP: bool> Iterator for ArrayCounter<LEN, LOOP> {
 
 #[test]
 fn test_array_counter() {
-    let mut counter = ArrayCounter::<3, true>::new(Endianness::Little, 3);
+    let mut counter = ArrayCounter::<3>::new(Endianness::Little, 3);
     assert_eq!(counter.nth(5), Some([2, 1, 0]));
-    assert_eq!(counter.nth(22), Some([1, 0, 0]));
+    assert_eq!(counter.nth(20), Some([2, 2, 2]));
 
-    let mut counter = ArrayCounter::<3, true>::new(Endianness::Big, 3);
+    let mut counter = ArrayCounter::<3>::new(Endianness::Big, 3);
     assert_eq!(counter.nth(5), Some([0, 1, 2]));
-    assert_eq!(counter.nth(22), Some([0, 0, 1]));
 }
 
 pub const DIGIT_NAMES: [&str; 10] = [

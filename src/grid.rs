@@ -1,7 +1,6 @@
 use crate::{
-    prelude::LineDirection,
     v,
-    vector::{RookDirection, Vector},
+    vector::{BishopDirection, LineDirection, RookDirection, Vector},
 };
 
 use std::{
@@ -146,6 +145,29 @@ impl<T, const DIM: usize> Grid<T, DIM> {
         center: GridPos<DIM>,
     ) -> impl Iterator<Item = (GridPos<DIM>, &T)> {
         RookDirection::<DIM>::iter().filter_map(move |d| {
+            let n = center + d;
+            self.get(n).map(|v| (n, v))
+        })
+    }
+
+    pub fn bishop_neighbors(&self, center: GridPos<DIM>) -> impl Iterator<Item = &T> {
+        BishopDirection::<DIM>::iter().filter_map(move |d| self.get(center + d))
+    }
+
+    pub fn bishop_neighbor_positions<'a>(
+        &'a self,
+        center: GridPos<DIM>,
+    ) -> impl Iterator<Item = GridPos<DIM>> + 'a {
+        BishopDirection::<DIM>::iter()
+            .map(move |d| center + d)
+            .filter(|&n| self.contains_pos(n))
+    }
+
+    pub fn enumerated_bishop_neighbors(
+        &self,
+        center: GridPos<DIM>,
+    ) -> impl Iterator<Item = (GridPos<DIM>, &T)> {
+        BishopDirection::<DIM>::iter().filter_map(move |d| {
             let n = center + d;
             self.get(n).map(|v| (n, v))
         })
