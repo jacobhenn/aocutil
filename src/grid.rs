@@ -131,6 +131,16 @@ impl<T, const DIM: usize> Grid<T, DIM> {
         RookDirection::<DIM>::iter().filter_map(move |d| self.get(center + d))
     }
 
+    pub fn rook_neighbor_positions<'a>(
+        &'a self,
+        center: GridPos<DIM>,
+    ) -> impl Iterator<Item = GridPos<DIM>> + 'a {
+        RookDirection::<DIM>::iter()
+            .map(move |d| center + d)
+            .filter(|&n| self.contains_pos(n))
+    }
+
+    // TODO: rename this to rook_neighbors_with_pos or something
     pub fn enumerated_rook_neighbors(
         &self,
         center: GridPos<DIM>,
