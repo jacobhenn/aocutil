@@ -7,20 +7,19 @@ impl Graph for GridGraph {
 
     type Node = GridPos;
 
-    type Neighbors<'a> = Box<dyn Iterator<Item = (u32, GridPos)> + 'a>;
-
-    fn neighbors<'a>(&'a self, center: &'a GridPos) -> Self::Neighbors<'a> {
-        Box::new(
-            RookDirection::iter()
-                .map(|d| *center + d)
-                .filter_map(|n| self.0.get(n).map(|w| (*w, n))),
-        )
+    fn neighbors<'a>(
+        &'a self,
+        center: &'a GridPos,
+    ) -> impl Iterator<Item = (Self::Distance, Self::Node)> + 'a {
+        RookDirection::iter()
+            .map(|d| *center + d)
+            .filter_map(|n| self.0.get(n).map(|w| (*w, n)))
     }
 }
 
 #[test]
 fn test_shortest_path() {
-    let _ = aocutil::test_logger().init();
+    let _ = aocutil::log::test_subscriber().init();
 
     let grid: Grid<u32> = vec![vec![1, 0, 3], vec![0, 9, 0], vec![4, 0, 7]]
         .into_iter()

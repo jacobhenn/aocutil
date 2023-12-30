@@ -13,11 +13,10 @@ pub trait Graph {
 
     type Node;
 
-    type Neighbors<'a>: Iterator<Item = (Self::Distance, Self::Node)>
-    where
-        Self: 'a;
-
-    fn neighbors<'a>(&'a self, center: &'a Self::Node) -> Self::Neighbors<'a>;
+    fn neighbors<'a>(
+        &'a self,
+        center: &'a Self::Node,
+    ) -> impl Iterator<Item = (Self::Distance, Self::Node)> + 'a;
 
     // TODO: add documentation
     fn shortest_paths_dijkstra(
