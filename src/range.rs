@@ -88,7 +88,7 @@ impl<T> AsBounds<T> for std::ops::RangeInclusive<T> {
 }
 
 impl<T> Range<T> {
-    pub fn new(start: T, end: T) -> Self {
+    pub const fn new(start: T, end: T) -> Self {
         Self { start, end }
     }
 
