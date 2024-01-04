@@ -1,6 +1,6 @@
 use crate::{
+    geometry::{BishopDirection, LineDirection, RookDirection, Vector},
     v,
-    vector::{BishopDirection, LineDirection, RookDirection, Vector},
 };
 
 use std::{
@@ -337,6 +337,7 @@ impl<T> Grid<T, 2> {
         assert_eq!(self.values.len(), self.dimensions[0] * self.dimensions[1]);
     }
 
+    #[must_use]
     pub fn render(&self, render_val: impl Fn(GridPos, &T) -> char) -> String {
         let mut res = String::with_capacity((self.width() + 1) * self.height());
         for (y, row) in self.rows().enumerate() {

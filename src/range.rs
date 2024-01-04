@@ -1,21 +1,31 @@
 use std::{
     cmp::{self, Ordering},
     fmt::Debug,
+    ops::Sub,
 };
 
+pub mod multi;
+
 /// Discretely ordered types.
-pub trait DiscreteOrd: PartialOrd {
-    /// Returns `true` if there does not exist any term `x` of this type such that
-    /// `x > self && x < rhs`.
-    fn abuts(&self, rhs: &Self) -> bool;
+// TODO: replace with `iter::Step` once that's stabilized
+pub trait DiscreteOrd: PartialOrd + Sized {
+    fn successor(self) -> Self;
+
+    fn predecessor(self) -> Self;
+
+    fn abuts(&self, other: &Self) -> bool;
 }
 
 macro_rules! int_discrete_ord_impl {
     { $($t:ty)+ } => {
         $(
             impl DiscreteOrd for $t {
-                fn abuts(&self, rhs: &Self) -> bool {
-                    self.abs_diff(*rhs) == 1
+                fn successor(self) -> Self { self + 1 }
+
+                fn predecessor(self) -> Self { self - 1 }
+
+                fn abuts(&self, other: &Self) -> bool {
+                    self.abs_diff(*other) == 1
                 }
             }
         )+
@@ -23,21 +33,6 @@ macro_rules! int_discrete_ord_impl {
 }
 
 int_discrete_ord_impl! { u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize }
-
-/// This implementation is probably nonsensical for non-finite values but who cares!
-macro_rules! float_discrete_ord_impl {
-    { $($t:ty)+ } => {
-        $(
-            impl DiscreteOrd for $t {
-                fn abuts(&self, rhs: &Self) -> bool {
-                    self.to_bits().abuts(&rhs.to_bits())
-                }
-            }
-        )+
-    }
-}
-
-float_discrete_ord_impl! { f32 f64 }
 
 /// An inclusive range representing all values `x: T` such that
 /// `x >= range.start && x <= range.end`
@@ -72,6 +67,26 @@ impl<T> AsBounds<T> for Range<T> {
     }
 }
 
+impl<T> AsBounds<T> for Range<&T> {
+    fn start(&self) -> &T {
+        self.start
+    }
+
+    fn end(&self) -> &T {
+        self.end
+    }
+}
+
+impl<T> AsBounds<T> for std::ops::RangeInclusive<T> {
+    fn start(&self) -> &T {
+        self.start()
+    }
+
+    fn end(&self) -> &T {
+        self.end()
+    }
+}
+
 impl<T> Range<T> {
     pub fn new(start: T, end: T) -> Self {
         Self { start, end }
@@ -82,6 +97,28 @@ impl<T> Range<T> {
         T: PartialOrd,
     {
         self.start > self.end
+    }
+
+    // TODO: how should this handle empty ranges?
+    /// For ranges of discrete values, returns how many values are contained.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use aocutil::range::Range;
+    ///
+    /// assert_eq!(Range::new(0, 6).len(), 7);
+    /// assert_eq!(Range::new(6, 0).len(), 0);
+    /// ```
+    pub fn len(self) -> T
+    where
+        T: Sub<T, Output = T> + num::Zero + DiscreteOrd,
+    {
+        if self.is_empty() {
+            return T::zero();
+        }
+
+        (self.end - self.start).successor()
     }
 
     /// Creates a range between the smaller of `a` and `b` to the larger. If there is no ordering
@@ -180,6 +217,54 @@ impl<T> Range<T> {
             end: f(self.end),
         }
     }
+
+    /// Returns an iterator of at most two ranges encoding the set difference `self - other`. The
+    /// iterator is guaranteed to be increasing according to `Range::partial_ord`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use aocutil::range::Range;
+    ///
+    /// let mut diff = Range::new(0, 100).difference(25..=75);
+    /// assert_eq!(diff.next(), Some(Range::new(0, 24)));
+    /// assert_eq!(diff.next(), Some(Range::new(76, 100)));
+    /// assert_eq!(diff.next(), None);
+    ///
+    /// let mut diff = Range::new(0, 100).difference(50..=150);
+    /// assert_eq!(diff.next(), Some(Range::new(0, 49)));
+    /// assert_eq!(diff.next(), None);
+    ///
+    /// let mut diff = Range::new(25, 50).difference(0..=100);
+    /// assert_eq!(diff.next(), None);
+    /// ```
+    pub fn difference(self, other: impl Into<Range<T>>) -> impl DoubleEndedIterator<Item = Self>
+    where
+        T: DiscreteOrd,
+    {
+        let other: Range<T> = other.into();
+
+        let intersect = self.intersects(&other);
+
+        [
+            Range::new(self.start, other.start.predecessor()),
+            Range::new(other.end.successor(), self.end),
+        ]
+        .into_iter()
+        .filter(move |r| intersect && !r.is_empty())
+    }
+}
+
+#[test]
+fn disjoint_difference() {
+    let a = Range::new(50, 100);
+    let b = Range::new(0, 0);
+
+    let mut diff = a.difference(b);
+    assert_eq!(diff.next(), None);
+
+    let mut diff = b.difference(a);
+    assert_eq!(diff.next(), None);
 }
 
 impl<T> Debug for Range<T>

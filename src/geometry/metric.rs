@@ -1,4 +1,4 @@
-use crate::vector::Vector;
+use crate::geometry::Vector;
 
 #[cfg(test)]
 use crate::v;

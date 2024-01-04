@@ -1,29 +1,25 @@
 use std::{
-    array, cmp,
+    array,
     collections::{hash_map::DefaultHasher, HashMap},
     env,
     fmt::{self, Display},
     hash::{Hash, Hasher},
     marker::PhantomData,
     mem::MaybeUninit,
-    ops::{Add, RangeInclusive},
+    ops::RangeInclusive,
     ptr,
     str::FromStr,
 };
 
 use itertools::Itertools;
 
-use num::{One, Signed};
+use num::Signed;
 
-use tracing_subscriber::{util::SubscriberInitExt, EnvFilter};
-
-pub mod vector;
+pub mod geometry;
 
 pub mod grid;
 
 pub mod parse;
-
-pub mod metric;
 
 pub mod graph;
 
@@ -31,21 +27,26 @@ pub mod range;
 
 pub mod range_set;
 
+pub mod log;
+
+pub mod radix;
+
 pub mod prelude {
     pub use super::{
+        geometry::*,
         graph::*,
         grid::*,
-        metric::*,
         parse::*,
         part::{self, AocPart, Part},
+        radix::*,
         range::*,
         range_set::*,
-        vector::*,
         *,
     };
 
     pub use std::{
-        any, array, cell,
+        any, array,
+        cell::{self, Cell, RefCell},
         cmp::{self, Ordering},
         collections::*,
         env, f64, fmt,
@@ -55,7 +56,9 @@ pub mod prelude {
         hint, iter,
         marker::PhantomData,
         mem, ops, ptr,
+        rc::{self, Rc},
         str::FromStr,
+        sync::{self, RwLock},
         thread,
     };
 
@@ -458,150 +461,6 @@ pub fn factor(mut n: u32) -> HashMap<u32, usize> {
     factors
 }
 
-pub trait RangeExt<T> {
-    fn ordered(left: T, right: T) -> Self
-    where
-        T: PartialOrd;
-
-    fn intersects(&self, other: &Self) -> bool
-    where
-        T: PartialOrd;
-
-    fn contains_range(&self, val: &Self) -> bool
-    where
-        T: PartialOrd;
-
-    fn touches(&self, other: &Self) -> bool
-    where
-        T: PartialOrd + Add<Output = T> + One + Clone;
-
-    fn combine(self, other: Self) -> Self
-    where
-        T: Ord;
-
-    fn intersection(self, other: Self) -> Self
-    where
-        T: Ord;
-
-    fn pretty_print(&self) -> String
-    where
-        T: Display;
-}
-
-impl<T> RangeExt<T> for RangeInclusive<T> {
-    fn ordered(left: T, right: T) -> Self
-    where
-        T: PartialOrd,
-    {
-        if left < right {
-            left..=right
-        } else {
-            right..=left
-        }
-    }
-
-    fn intersects(&self, other: &Self) -> bool
-    where
-        T: PartialOrd,
-    {
-        (self.start() <= other.end() && self.end() >= other.start())
-            || (other.start() <= self.end() && other.end() >= self.start())
-    }
-
-    fn contains_range(&self, other: &Self) -> bool
-    where
-        T: PartialOrd,
-    {
-        self.start() <= other.start() && self.end() >= other.end()
-    }
-
-    fn touches(&self, other: &Self) -> bool
-    where
-        T: PartialOrd + Add<Output = T> + One + Clone,
-    {
-        self.intersects(other)
-            || self.end().clone() + T::one() == *other.end()
-            || other.end().clone() + T::one() == *other.start()
-    }
-
-    fn combine(self, other: Self) -> Self
-    where
-        T: Ord,
-    {
-        let (self_start, self_end) = self.into_inner();
-        let (other_start, other_end) = other.into_inner();
-        cmp::min(self_start, other_start)..=cmp::max(self_end, other_end)
-    }
-
-    fn intersection(self, other: Self) -> Self
-    where
-        T: Ord,
-    {
-        let (self_start, self_end) = self.into_inner();
-        let (other_start, other_end) = other.into_inner();
-        cmp::max(self_start, other_start)..=cmp::min(self_end, other_end)
-    }
-
-    fn pretty_print(&self) -> String
-    where
-        T: Display,
-    {
-        format!("{}..{}", self.start(), self.end())
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum PlaneAxis {
-    Horizontal,
-    Vertical,
-}
-
-impl PlaneAxis {
-    pub fn iter() -> impl Iterator<Item = Self> {
-        [Self::Horizontal, Self::Vertical].into_iter()
-    }
-
-    pub fn other(self) -> Self {
-        match self {
-            PlaneAxis::Horizontal => PlaneAxis::Vertical,
-            PlaneAxis::Vertical => PlaneAxis::Horizontal,
-        }
-    }
-}
-
-impl Display for PlaneAxis {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PlaneAxis::Horizontal => f.write_str("horizontal"),
-            PlaneAxis::Vertical => f.write_str("vertical"),
-        }
-    }
-}
-
-pub fn display_range<T>(range: &RangeInclusive<T>) -> String
-where
-    T: Display,
-{
-    format!("{}..{}", range.start(), range.end())
-}
-
-pub fn default_logger() -> impl SubscriberInitExt {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .without_time()
-        .with_target(false)
-        .with_line_number(true)
-}
-
-pub fn test_logger() -> impl SubscriberInitExt {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .without_time()
-        .with_target(false)
-        .with_line_number(true)
-        .with_test_writer()
-}
-
 pub mod part {
     #[derive(Clone, Copy, PartialEq, Eq, Hash)]
     pub enum Part {
@@ -676,7 +535,7 @@ macro_rules! example_tests {
             #[test]
             #[allow(unreachable_code)]
             fn $p1n() {
-                let _ = aocutil::test_logger().try_init();
+                let _ = aocutil::log::test_subscriber().try_init();
                 assert_eq!(solve::<aocutil::part::One>($p1in), $p1out);
             }
         )*
@@ -685,7 +544,7 @@ macro_rules! example_tests {
             #[test]
             #[allow(unreachable_code)]
             fn $p2n() {
-                let _ = aocutil::test_logger().try_init();
+                let _ = aocutil::log::test_subscriber().try_init();
                 assert_eq!(solve::<aocutil::part::Two>($p2in), $p2out);
             }
         )*
@@ -700,7 +559,7 @@ macro_rules! aoc_test {
         #[test]
         #[allow(unreachable_code)]
         fn $name() {
-            let _ = aocutil::test_logger().try_init();
+            let _ = aocutil::log::test_subscriber().try_init();
             assert_eq!(
                 solve::<$part>(
                     $({

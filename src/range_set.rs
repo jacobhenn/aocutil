@@ -1,11 +1,6 @@
 use crate::range::{AsBounds, DiscreteOrd, Range};
 
-use std::{
-    borrow::Borrow,
-    cmp::Ordering,
-    fmt::Debug,
-    ops::{Add, Sub},
-};
+use std::{borrow::Borrow, cmp::Ordering, fmt::Debug};
 
 /// A set of values of type `T`, compressed by the use of ranges.
 ///
@@ -24,7 +19,7 @@ use std::{
 /// assert_eq!(ranges, &[Range::new(-8, -5), Range::new(-3, 78)]);
 /// ```
 // TODO: write down laws this must follow and make sure they're enforced
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct RangeSet<T> {
     ranges: Vec<Range<T>>,
 }
@@ -46,7 +41,7 @@ impl<T> RangeSet<T> {
         Self { ranges: Vec::new() }
     }
 
-    fn find_containing_range_idx<Q>(&self, key: &Q) -> Result<usize, usize>
+    fn containing_range_idx<Q>(&self, key: &Q) -> Result<usize, usize>
     where
         Q: Borrow<T>,
         T: PartialOrd,
@@ -67,9 +62,7 @@ impl<T> RangeSet<T> {
         Q: Borrow<T>,
         T: PartialOrd,
     {
-        self.find_containing_range_idx(key)
-            .map(|i| &self.ranges[i])
-            .ok()
+        self.containing_range_idx(key).map(|i| &self.ranges[i]).ok()
     }
 
     /// Tests if the range set contains the given key value.
@@ -78,7 +71,7 @@ impl<T> RangeSet<T> {
         Q: Borrow<T>,
         T: PartialOrd,
     {
-        self.find_containing_range_idx(key).is_ok()
+        self.containing_range_idx(key).is_ok()
     }
 
     pub fn intersects(&self, rhs: &impl AsBounds<T>) -> bool
@@ -178,34 +171,28 @@ impl<T> RangeSet<T> {
         }
     }
 
-    // TODO: think this over more. rework the trait bounds; these are messy
+    // TODO: see if this can be made even simpler
     pub fn remove(&mut self, range_to_remove: impl Into<Range<T>>)
     where
-        T: PartialOrd + Clone + Add<i64, Output = T> + Sub<i64, Output = T>,
+        T: DiscreteOrd + Clone,
     {
         let range_to_remove = range_to_remove.into();
 
-        let first_intersecting_idx = self.find_containing_range_idx(&range_to_remove.start);
-        let last_intersecting_idx = self.find_containing_range_idx(&range_to_remove.end);
+        let first_intersecting_idx = self.containing_range_idx(&range_to_remove.start);
+        let last_intersecting_idx = self.containing_range_idx(&range_to_remove.end);
 
         if first_intersecting_idx == last_intersecting_idx {
             if let Ok(i) = first_intersecting_idx {
                 let containing_range = self.ranges.remove(i);
 
-                let left_remenant =
-                    Range::new(range_to_remove.end + 1, containing_range.end.clone());
-                if !left_remenant.is_empty() {
-                    self.ranges.insert(i, left_remenant);
-                }
-                let right_remenant = Range::new(containing_range.start, range_to_remove.start - 1);
-                if !right_remenant.is_empty() {
-                    self.ranges.insert(i, right_remenant);
+                for remenant in containing_range.difference(range_to_remove).rev() {
+                    self.ranges.insert(i, remenant);
                 }
             }
         } else {
             let first_idx_to_remove = match first_intersecting_idx {
                 Ok(i) => {
-                    self.ranges[i].end = range_to_remove.start - 1;
+                    self.ranges[i].end = range_to_remove.start.predecessor();
 
                     i + 1
                 }
@@ -214,7 +201,7 @@ impl<T> RangeSet<T> {
 
             let last_idx_to_remove = match last_intersecting_idx {
                 Ok(i) => {
-                    self.ranges[i].start = range_to_remove.end + 1;
+                    self.ranges[i].start = range_to_remove.end.successor();
 
                     i - 1
                 }

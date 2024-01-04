@@ -6,7 +6,7 @@ use std::{
     ops::Add,
 };
 
-use tracing::{debug, trace};
+use tracing::trace;
 
 pub trait Graph {
     type Distance;
@@ -23,6 +23,7 @@ pub trait Graph {
         &self,
         start: Self::Node,
         is_target: impl Fn(&Self::Node) -> bool,
+        cmp: impl Fn(&Self::Distance, &Self::Distance) -> Ordering + Clone,
     ) -> (
         Option<Self::Node>,
         HashMap<Self::Node, (Self::Distance, Self::Node)>,
@@ -40,17 +41,19 @@ pub trait Graph {
         let mut frontier = BinaryHeap::new();
 
         for (distance, neighbor) in self.neighbors(&start) {
-            frontier.push(RevCmpByKey {
+            frontier.push(RevCmpBy {
                 key: distance.clone(),
                 val: neighbor.clone(),
+                cmp: cmp.clone(),
             });
 
             spanning_tree.insert(neighbor, (distance, start.clone()));
         }
 
-        while let Some(RevCmpByKey {
+        while let Some(RevCmpBy {
             key: current_node_dist,
             val: current_node,
+            ..
         }) = frontier.pop()
         {
             trace!("looking at frontier entry: {current_node:?} at dist {current_node_dist:?}");
@@ -98,9 +101,10 @@ pub trait Graph {
                     (neighbor_new_dist.clone(), current_node.clone()),
                 );
 
-                frontier.push(RevCmpByKey {
+                frontier.push(RevCmpBy {
                     key: neighbor_new_dist,
                     val: neighbor,
+                    cmp: cmp.clone(),
                 });
             }
         }
@@ -111,36 +115,37 @@ pub trait Graph {
 
 /// A container for which all comparison operations use a key, and comparison
 /// is reversed. This is mainly just a helper type for making Dijkstra's algorithm cleaner.
-struct RevCmpByKey<K, V> {
+struct RevCmpBy<K, V, F> {
     key: K,
     val: V,
+    cmp: F,
 }
 
-impl<K, V> PartialEq for RevCmpByKey<K, V>
+impl<K, V, F> PartialEq for RevCmpBy<K, V, F>
 where
-    K: PartialEq,
+    F: Fn(&K, &K) -> Ordering,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.key == other.key
+        (self.cmp)(&self.key, &other.key).is_eq()
     }
 }
 
-impl<K, V> Eq for RevCmpByKey<K, V> where K: Eq {}
+impl<K, V, F> Eq for RevCmpBy<K, V, F> where F: Fn(&K, &K) -> Ordering {}
 
-impl<K, V> Ord for RevCmpByKey<K, V>
+impl<K, V, F> Ord for RevCmpBy<K, V, F>
 where
-    K: Ord,
+    F: Fn(&K, &K) -> Ordering,
 {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.key.cmp(&other.key).reverse()
+        (self.cmp)(&self.key, &other.key).reverse()
     }
 }
 
-impl<K, V> PartialOrd for RevCmpByKey<K, V>
+impl<K, V, F> PartialOrd for RevCmpBy<K, V, F>
 where
-    K: PartialOrd,
+    F: Fn(&K, &K) -> Ordering,
 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.key.partial_cmp(&other.key).map(Ordering::reverse)
+        Some((self.cmp)(&self.key, &other.key).reverse())
     }
 }

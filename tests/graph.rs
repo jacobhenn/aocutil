@@ -25,7 +25,7 @@ fn test_shortest_path() {
         .into_iter()
         .collect();
     let graph = GridGraph(grid);
-    let (_, spanning_tree) = graph.shortest_paths_dijkstra(v!(0, 0), |&v| v == v!(2, 2));
+    let (_, spanning_tree) = graph.shortest_paths_dijkstra(v!(0, 0), |&v| v == v!(2, 2), u32::cmp);
 
     assert_eq!(spanning_tree.get(&v!(2, 2)).unwrap().0, 10);
 }
