@@ -332,13 +332,12 @@ pub trait IteratorExt: Iterator + Sized {
     fn fill_array<const N: usize>(&mut self) -> Option<[Self::Item; N]> {
         let mut res =
             unsafe { MaybeUninit::<[MaybeUninit<Self::Item>; N]>::uninit().assume_init() };
-        let mut i = 0;
+
         for slot in &mut res {
             slot.write(self.next()?);
-            i += 1;
         }
 
-        (i >= N).then(|| res.map(|u| unsafe { u.assume_init() }))
+        Some(res.map(|u| unsafe { u.assume_init() }))
     }
 
     fn util_array_chunks<const N: usize>(self) -> ArrayChunks<Self, N> {
@@ -358,6 +357,16 @@ pub trait IteratorExt: Iterator + Sized {
 }
 
 impl<T> IteratorExt for T where T: Iterator {}
+
+#[test]
+fn test_fill_array() {
+    let mut it = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].into_iter();
+
+    assert_eq!(it.fill_array::<3>(), Some([0, 1, 2]));
+    assert_eq!(it.fill_array::<0>(), Some([]));
+    assert_eq!(it.fill_array::<3>(), Some([3, 4, 5]));
+    assert_eq!(it.fill_array::<10>(), None);
+}
 
 pub fn transpose<T>(vecs: Vec<Vec<T>>) -> Vec<Vec<T>>
 where
